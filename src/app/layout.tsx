@@ -26,6 +26,9 @@ export const metadata: Metadata = {
   },
   description:
     "Point of sale, appointments, inventory, expenses and analytics for Sana's Beauty Saloon.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export const viewport: Viewport = {
