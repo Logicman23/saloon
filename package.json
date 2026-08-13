@@ -2,7 +2,7 @@
   "name": "sanas-beauty-salon-management",
   "version": "1.0.0",
   "private": true,
-  "description": "Sana's Beauty Saloon Management System — POS, appointments, inventory, expenses and analytics.",
+  "description": "Sana's Beauty Saloon Management System â€” POS, appointments, inventory, expenses and analytics.",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
@@ -11,7 +11,7 @@
     "typecheck": "prisma generate && tsc --noEmit",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
-    "db:seed": "tsx prisma/seed-rbac.ts",
+    "db:seed": "tsx prisma/seed.ts",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio"
@@ -44,6 +44,8 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.5",
+    "@electric-sql/pglite-socket": "^0.2.8",
     "@eslint/eslintrc": "^3.3.6",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.10.7",

@@ -7,7 +7,13 @@ import {
   cookieOptions,
   signSession,
 } from "@/lib/auth/session";
-import { dummyVerify, findUserByEmail, verifyPassword } from "@/lib/auth/users.server";
+import {
+  dummyVerify,
+  findUserByEmail,
+  recordLoginFailure,
+  recordLoginSuccess,
+  verifyPassword,
+} from "@/lib/auth/users.server";
 import { landingFor } from "@/lib/auth/permissions";
 
 /** pbkdf2 needs Node APIs, so this handler must not run on the Edge runtime. */
@@ -75,7 +81,16 @@ export async function POST(request: Request) {
   }
 
   const { email, password, remember } = parsed.data;
-  const user = findUserByEmail(email);
+
+  let user: Awaited<ReturnType<typeof findUserByEmail>>;
+  try {
+    user = await findUserByEmail(email);
+  } catch (error) {
+    // A database that is unreachable or unmigrated must not read as a wrong
+    // password — that sends people hunting for the wrong problem.
+    console.error("[auth] user lookup failed:", error);
+    return NextResponse.json({ error: "database_unavailable" }, { status: 503 });
+  }
 
   // Always spend the hashing cost, even for unknown accounts, so response
   // time cannot be used to enumerate valid addresses.
@@ -84,7 +99,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_credentials" }, { status: 401 });
   }
 
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    return NextResponse.json({ error: "account_locked" }, { status: 423 });
+  }
+
   if (!verifyPassword(password, user.passwordSalt, user.passwordHash)) {
+    await recordLoginFailure(user.id);
     return NextResponse.json({ error: "invalid_credentials" }, { status: 401 });
   }
 
@@ -95,6 +115,7 @@ export async function POST(request: Request) {
   }
 
   clearThrottle(ip);
+  await recordLoginSuccess(user.id);
 
   const maxAge = remember ? REMEMBER_MAX_AGE : SHIFT_MAX_AGE;
 

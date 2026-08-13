@@ -47,6 +47,16 @@ const ERROR_COPY: Record<string, { title: string; description: string }> = {
     description:
       "AUTH_SECRET is missing or too short on the server, so sessions can't be signed. This is a deployment setting, not your password.",
   },
+  database_unavailable: {
+    title: "Database unreachable",
+    description:
+      "The account couldn't be looked up. Check DATABASE_URL and that the migration has been applied — this is not your password.",
+  },
+  account_locked: {
+    title: "Account temporarily locked",
+    description:
+      "Too many failed attempts on this account. It unlocks automatically in 15 minutes, or the owner can reset it.",
+  },
   server_error: {
     title: "Server error",
     description: "The sign-in service failed. Check the server logs — your credentials are fine.",
@@ -72,17 +82,12 @@ function errorFor(status: number, code?: string) {
   return ERROR_COPY.invalid_credentials;
 }
 
-const DEMO_LOGINS: Array<{
-  role: Role;
-  email: string;
-  password: string;
-  icon: LucideIcon;
-}> = [
-  { role: "ADMIN", email: "owner@sanasbeauty.pk", password: "Owner@2026", icon: ShieldCheck },
-  { role: "CASHIER", email: "reception@sanasbeauty.pk", password: "Front@2026", icon: Wallet },
-  { role: "STAFF", email: "ayesha@sanasbeauty.pk", password: "Studio@2026", icon: Sparkles },
-];
-
+/**
+ * The role-switcher that used to sit here shipped real passwords in the
+ * client bundle — anyone who opened the page could sign in as the owner.
+ * Credentials now live in the `users` table and are created by
+ * `npm run db:seed`, so there is nothing to hard-code.
+ */
 export default function LoginPage() {
   return (
     <React.Suspense fallback={null}>
@@ -297,63 +302,43 @@ function LoginView() {
             </Button>
           </form>
 
-          {/* --------------------------------------------- Demo switcher */}
+          {/* Role hints — no credentials, just what each account can reach. */}
           <div className="mt-6">
             <div className="mb-3 flex items-center gap-3">
               <span className="h-px flex-1 bg-hairline" />
               <span className="text-[10px] uppercase tracking-[0.18em] text-faint">
-                Demo sign-in
+                Access levels
               </span>
               <span className="h-px flex-1 bg-hairline" />
             </div>
 
-            <div className="space-y-1.5">
-              {DEMO_LOGINS.map((demo) => {
-                const meta = ROLE_META[demo.role];
-                const busy = pending === demo.role;
+            <ul className="space-y-1.5">
+              {(["ADMIN", "CASHIER", "STAFF"] as Role[]).map((role) => {
+                const meta = ROLE_META[role];
                 return (
-                  <button
-                    key={demo.role}
-                    type="button"
-                    disabled={pending !== null}
-                    onClick={() =>
-                      void submit({ email: demo.email, password: demo.password }, demo.role)
-                    }
-                    className={cn(
-                      "group flex w-full items-center gap-3 rounded-lg border border-hairline bg-obsidian-elevated px-3 py-2.5 text-left transition-all",
-                      "hover:border-gold/40 hover:bg-white/[0.03] disabled:opacity-50",
-                    )}
+                  <li
+                    key={role}
+                    className="flex items-center gap-3 rounded-lg border border-hairline bg-obsidian-elevated px-3 py-2"
                   >
                     <span
-                      className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg ring-1"
-                      style={{
-                        backgroundColor: `${meta.accent}1a`,
-                        color: meta.accent,
-                        boxShadow: `inset 0 0 0 1px ${meta.accent}33`,
-                      }}
-                    >
-                      {busy ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <demo.icon className="size-4" />
-                      )}
-                    </span>
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: meta.accent }}
+                      aria-hidden
+                    />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-ink">
-                        Login as {meta.label}
+                      <span className="block truncate text-xs font-medium text-ink">
+                        {meta.label}
                       </span>
                       <span className="block truncate text-[11px] text-faint">{meta.blurb}</span>
                     </span>
-                    <UserCog className="size-3.5 shrink-0 text-faint transition-colors group-hover:text-gold" />
-                  </button>
+                  </li>
                 );
               })}
-            </div>
+            </ul>
 
-            <p className="mt-3 rounded-lg border border-warning/20 bg-warning/[0.05] p-2.5 text-[11px] leading-relaxed text-warning/90">
-              Demo accounts with seeded passwords. Remove{" "}
-              <code className="font-mono">DEMO_CREDENTIALS</code> and this switcher before the
-              salon goes live.
+            <p className="mt-3 text-[11px] leading-relaxed text-faint">
+              Accounts are created by the salon owner. Lost your password? Ask Sana to reset it
+              from the Staff module.
             </p>
           </div>
         </div>

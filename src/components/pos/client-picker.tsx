@@ -49,14 +49,25 @@ export function ClientPicker({
     [selected, invoices, appointments],
   );
 
-  const createClient = () => {
+  const [error, setError] = React.useState("");
+
+  const createClient = async () => {
     if (!name.trim() || !phone.trim()) return;
-    const client = actions.addClient({ name: name.trim(), phone: phone.trim(), gender: "Female" });
+    const client = await actions.addClient({
+      name: name.trim(),
+      phone: phone.trim(),
+      gender: "Female",
+    });
+    if (!client) {
+      setError(actions.lastError ?? "Couldn't create that client.");
+      return;
+    }
     onSelect(client);
     setAdding(false);
     setName("");
     setPhone("");
     setQuery("");
+    setError("");
   };
 
   /* ------------------------------------------------- Selected state */
@@ -145,19 +156,20 @@ export function ClientPicker({
           placeholder="Full name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && createClient()}
+          onKeyDown={(e) => e.key === "Enter" && void createClient()}
         />
         <Input
           placeholder="Phone number"
           inputMode="tel"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && createClient()}
+          onKeyDown={(e) => e.key === "Enter" && void createClient()}
         />
+        {error && <p className="text-[11px] text-danger">{error}</p>}
         <Button
           size="sm"
           className="w-full"
-          onClick={createClient}
+          onClick={() => void createClient()}
           disabled={!name.trim() || !phone.trim()}
         >
           <Check /> Add &amp; attach

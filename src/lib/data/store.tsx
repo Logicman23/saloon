@@ -1,9 +1,20 @@
 "use client";
 
 import * as React from "react";
-import { computeTotals, formatInvoiceNumber, invoiceStatusFor } from "@/lib/billing";
-import * as seed from "@/lib/data/seed";
+import { useRouter } from "next/navigation";
+import { computeTotals } from "@/lib/billing";
 import { round2 } from "@/lib/utils";
+import {
+  createAppointmentAction,
+  createClientAction,
+  createExpenseAction,
+  deleteExpenseAction,
+  adjustStockAction,
+  setAppointmentStatusAction,
+  updateAppointmentAction,
+  updateClientNotesAction,
+} from "@/lib/actions/salon";
+import { checkoutAction } from "@/lib/actions/pos";
 import type {
   Appointment,
   AppointmentStatus,
@@ -23,14 +34,16 @@ import type {
 } from "@/lib/types";
 
 /**
- * In-memory repository backing the whole UI.
+ * Client-side view of the salon, hydrated from the database.
  *
- * Every mutation here maps to exactly one Prisma write in production; the
- * component tree never touches persistence directly, so swapping this
- * provider for server actions is a contained change.
+ * The provider no longer *generates* anything — `(app)/layout.tsx` reads the
+ * data on the server and passes it in. Mutations go to server actions, which
+ * write to Postgres and call `revalidatePath`; `router.refresh()` then pulls
+ * the updated snapshot back down. React state is a render cache here, never
+ * the source of truth.
  */
 
-interface SalonState {
+export interface SalonData {
   staff: Staff[];
   clients: Client[];
   services: Service[];
@@ -41,254 +54,249 @@ interface SalonState {
   expenses: Expense[];
   stockMovements: StockMovement[];
   promoCodes: PromoCode[];
-  invoiceSequence: number;
 }
 
 interface SalonActions {
-  addClient: (input: Omit<Client, "id" | "createdAt" | "tags"> & { tags?: string[] }) => Client;
-  updateClient: (id: string, patch: Partial<Client>) => void;
+  addClient: (input: {
+    name: string;
+    phone: string;
+    email?: string;
+    notes?: string;
+    gender?: Client["gender"];
+  }) => Promise<Client | null>;
+  updateClient: (id: string, patch: { notes?: string }) => Promise<void>;
 
-  bookAppointment: (input: Omit<Appointment, "id" | "createdAt">) => Appointment;
-  updateAppointment: (id: string, patch: Partial<Appointment>) => void;
-  setAppointmentStatus: (id: string, status: AppointmentStatus) => void;
+  bookAppointment: (input: {
+    clientId: string;
+    staffId: string;
+    serviceIds: string[];
+    start: string;
+    durationMin: number;
+    status?: AppointmentStatus;
+    notes?: string;
+  }) => Promise<void>;
+  updateAppointment: (
+    id: string,
+    patch: {
+      clientId: string;
+      staffId: string;
+      serviceIds: string[];
+      start: string;
+      notes?: string;
+    },
+  ) => Promise<void>;
+  setAppointmentStatus: (id: string, status: AppointmentStatus) => Promise<void>;
 
-  /** Commits a POS ticket: writes the invoice and decrements retail stock. */
   checkout: (input: {
     clientId: string;
     lines: InvoiceLine[];
     discount: DiscountState;
     payments: Payment[];
     taxRate: number;
-    createdByStaffId: string;
     appointmentId?: string;
     note?: string;
-  }) => Invoice;
+  }) => Promise<Invoice | null>;
 
-  addExpense: (input: Omit<Expense, "id">) => Expense;
-  deleteExpense: (id: string) => void;
+  addExpense: (input: Omit<Expense, "id">) => Promise<void>;
+  deleteExpense: (id: string) => Promise<void>;
 
   adjustStock: (input: {
     productId: string;
     type: StockMovementType;
     qty: number;
     note?: string;
-    staffId?: string;
-  }) => void;
-  upsertProduct: (product: Product) => void;
+  }) => Promise<void>;
 
-  upsertService: (service: Service) => void;
-  upsertPackage: (pkg: ServicePackage) => void;
-
-  resetDemoData: () => void;
+  /** Last error from a server action, for surfacing in the UI. */
+  lastError: string | null;
 }
 
-type SalonContextValue = SalonState & { actions: SalonActions };
+type SalonContextValue = SalonData & { actions: SalonActions; pending: boolean };
 
 const SalonContext = React.createContext<SalonContextValue | null>(null);
 
-function initialState(): SalonState {
-  return {
-    staff: seed.staff,
-    clients: seed.clients,
-    services: seed.services,
-    packages: seed.packages,
-    products: seed.products,
-    appointments: seed.appointments,
-    invoices: seed.invoices,
-    expenses: seed.expenses,
-    stockMovements: seed.stockMovements,
-    promoCodes: seed.promoCodes,
-    invoiceSequence: seed.nextInvoiceSequence,
-  };
-}
+export function SalonProvider({
+  data,
+  children,
+}: {
+  data: SalonData;
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = React.useTransition();
+  const [lastError, setLastError] = React.useState<string | null>(null);
 
-export function SalonProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = React.useState<SalonState>(initialState);
-
-  // Client-side sequence for generated ids. Kept in a ref so it never
-  // triggers a render and never diverges during hydration.
-  const idRef = React.useRef(0);
-  const newId = React.useCallback((prefix: string) => {
-    idRef.current += 1;
-    return `${prefix}_n${idRef.current}`;
-  }, []);
+  /** Re-fetches the server snapshot after a successful write. */
+  const refresh = React.useCallback(() => {
+    startTransition(() => router.refresh());
+  }, [router]);
 
   const actions = React.useMemo<SalonActions>(
     () => ({
-      addClient: (input) => {
-        const client: Client = {
-          ...input,
-          tags: input.tags ?? ["New"],
-          id: newId("cli"),
+      lastError,
+
+      addClient: async (input) => {
+        const result = await createClientAction(input);
+        if (!result.ok) {
+          setLastError(result.error);
+          return null;
+        }
+        setLastError(null);
+        refresh();
+        return {
+          id: result.data.id,
+          name: result.data.name,
+          phone: result.data.phone,
+          tags: ["New"],
           createdAt: new Date().toISOString(),
         };
-        setState((s) => ({ ...s, clients: [client, ...s.clients] }));
-        return client;
       },
 
-      updateClient: (id, patch) =>
-        setState((s) => ({
-          ...s,
-          clients: s.clients.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-        })),
+      updateClient: async (id, patch) => {
+        const result = await updateClientNotesAction(id, patch.notes ?? "");
+        if (!result.ok) setLastError(result.error);
+        else {
+          setLastError(null);
+          refresh();
+        }
+      },
 
-      bookAppointment: (input) => {
-        const appointment: Appointment = {
-          ...input,
-          id: newId("apt"),
+      bookAppointment: async (input) => {
+        const result = await createAppointmentAction({
+          clientId: input.clientId,
+          staffId: input.staffId,
+          serviceIds: input.serviceIds,
+          start: input.start,
+          notes: input.notes,
+        });
+        if (!result.ok) setLastError(result.error);
+        else {
+          setLastError(null);
+          refresh();
+        }
+      },
+
+      updateAppointment: async (id, patch) => {
+        const result = await updateAppointmentAction(id, {
+          clientId: patch.clientId,
+          staffId: patch.staffId,
+          serviceIds: patch.serviceIds,
+          start: patch.start,
+          notes: patch.notes,
+        });
+        if (!result.ok) setLastError(result.error);
+        else {
+          setLastError(null);
+          refresh();
+        }
+      },
+
+      setAppointmentStatus: async (id, status) => {
+        const result = await setAppointmentStatusAction(id, status);
+        if (!result.ok) setLastError(result.error);
+        else {
+          setLastError(null);
+          refresh();
+        }
+      },
+
+      checkout: async (input) => {
+        const result = await checkoutAction({
+          clientId: input.clientId,
+          appointmentId: input.appointmentId,
+          lines: input.lines.map((l) => ({
+            kind: l.kind,
+            refId: l.refId,
+            name: l.name,
+            unitPrice: l.unitPrice,
+            qty: l.qty,
+            staffId: l.staffId,
+            commissionRate: l.commissionRate,
+            lineDiscount: l.lineDiscount,
+          })),
+          discount: input.discount,
+          payments: input.payments.map((p) => ({
+            mode: p.mode,
+            amount: p.amount,
+            reference: p.reference,
+          })),
+          taxRate: input.taxRate,
+          note: input.note,
+        });
+
+        if (!result.ok) {
+          setLastError(result.error);
+          return null;
+        }
+        setLastError(null);
+        refresh();
+
+        // Enough of the invoice to render the receipt immediately, without
+        // waiting for the refresh to land.
+        const totals = computeTotals(input.lines, input.discount, input.taxRate, input.payments);
+        return {
+          id: result.data.invoiceId,
+          number: result.data.number,
+          clientId: input.clientId,
+          appointmentId: input.appointmentId,
+          lines: input.lines,
+          discount: input.discount,
+          payments: input.payments,
+          taxRate: input.taxRate,
+          status: totals.paid + 0.01 >= totals.total ? "PAID" : totals.paid > 0 ? "PARTIAL" : "UNPAID",
           createdAt: new Date().toISOString(),
+          createdByStaffId: "",
+          note: input.note,
         };
-        setState((s) => ({ ...s, appointments: [...s.appointments, appointment] }));
-        return appointment;
       },
 
-      updateAppointment: (id, patch) =>
-        setState((s) => ({
-          ...s,
-          appointments: s.appointments.map((a) => (a.id === id ? { ...a, ...patch } : a)),
-        })),
-
-      setAppointmentStatus: (id, status) =>
-        setState((s) => ({
-          ...s,
-          appointments: s.appointments.map((a) => (a.id === id ? { ...a, status } : a)),
-        })),
-
-      checkout: ({
-        clientId,
-        lines,
-        discount,
-        payments,
-        taxRate,
-        createdByStaffId,
-        appointmentId,
-        note,
-      }) => {
-        const totals = computeTotals(lines, discount, taxRate, payments);
-        const now = new Date();
-
-        let created!: Invoice;
-        setState((s) => {
-          const invoice: Invoice = {
-            id: newId("inv"),
-            number: formatInvoiceNumber(s.invoiceSequence, now.getFullYear()),
-            clientId,
-            appointmentId,
-            lines,
-            discount,
-            payments,
-            taxRate,
-            status: invoiceStatusFor(totals.total, totals.paid),
-            createdAt: now.toISOString(),
-            createdByStaffId,
-            note,
-          };
-          created = invoice;
-
-          // Retail lines consume stock and leave an audit trail.
-          const soldQty = new Map<string, number>();
-          for (const line of lines) {
-            if (line.kind === "PRODUCT") {
-              soldQty.set(line.refId, (soldQty.get(line.refId) ?? 0) + line.qty);
-            }
-          }
-
-          const movements: StockMovement[] = [];
-          soldQty.forEach((qty, productId) => {
-            idRef.current += 1;
-            movements.push({
-              id: `stk_n${idRef.current}`,
-              productId,
-              type: "RETAIL_SALE",
-              qty: -qty,
-              note: `Sold on ${invoice.number}`,
-              staffId: createdByStaffId,
-              at: now.toISOString(),
-            });
-          });
-
-          return {
-            ...s,
-            invoiceSequence: s.invoiceSequence + 1,
-            invoices: [invoice, ...s.invoices],
-            products: s.products.map((p) =>
-              soldQty.has(p.id) ? { ...p, stock: p.stock - (soldQty.get(p.id) ?? 0) } : p,
-            ),
-            stockMovements: [...movements, ...s.stockMovements],
-            appointments: appointmentId
-              ? s.appointments.map((a) =>
-                  a.id === appointmentId ? { ...a, status: "COMPLETED" as AppointmentStatus } : a,
-                )
-              : s.appointments,
-          };
+      addExpense: async (input) => {
+        const result = await createExpenseAction({
+          category: input.category,
+          amount: input.amount,
+          date: input.date,
+          vendor: input.vendor,
+          note: input.note,
+          paymentMode: input.paymentMode,
+          attachment: input.attachment,
         });
-
-        return created;
+        if (!result.ok) setLastError(result.error);
+        else {
+          setLastError(null);
+          refresh();
+        }
       },
 
-      addExpense: (input) => {
-        const expense: Expense = { ...input, id: newId("exp") };
-        setState((s) => ({ ...s, expenses: [expense, ...s.expenses] }));
-        return expense;
+      deleteExpense: async (id) => {
+        const result = await deleteExpenseAction(id);
+        if (!result.ok) setLastError(result.error);
+        else {
+          setLastError(null);
+          refresh();
+        }
       },
 
-      deleteExpense: (id) =>
-        setState((s) => ({ ...s, expenses: s.expenses.filter((e) => e.id !== id) })),
-
-      adjustStock: ({ productId, type, qty, note, staffId }) => {
-        // `qty` arrives unsigned from the UI; direction is implied by type.
-        const signed = type === "STOCK_IN" || type === "ADJUSTMENT" ? Math.abs(qty) : -Math.abs(qty);
-        setState((s) => {
-          idRef.current += 1;
-          const movement: StockMovement = {
-            id: `stk_n${idRef.current}`,
-            productId,
-            type,
-            qty: signed,
-            note,
-            staffId,
-            at: new Date().toISOString(),
-          };
-          return {
-            ...s,
-            stockMovements: [movement, ...s.stockMovements],
-            products: s.products.map((p) =>
-              p.id === productId ? { ...p, stock: Math.max(0, p.stock + signed) } : p,
-            ),
-          };
+      adjustStock: async (input) => {
+        const result = await adjustStockAction({
+          productId: input.productId,
+          type: input.type,
+          qty: input.qty,
+          note: input.note,
         });
+        if (!result.ok) setLastError(result.error);
+        else {
+          setLastError(null);
+          refresh();
+        }
       },
-
-      upsertProduct: (product) =>
-        setState((s) => ({
-          ...s,
-          products: s.products.some((p) => p.id === product.id)
-            ? s.products.map((p) => (p.id === product.id ? product : p))
-            : [product, ...s.products],
-        })),
-
-      upsertService: (service) =>
-        setState((s) => ({
-          ...s,
-          services: s.services.some((x) => x.id === service.id)
-            ? s.services.map((x) => (x.id === service.id ? service : x))
-            : [service, ...s.services],
-        })),
-
-      upsertPackage: (pkg) =>
-        setState((s) => ({
-          ...s,
-          packages: s.packages.some((x) => x.id === pkg.id)
-            ? s.packages.map((x) => (x.id === pkg.id ? pkg : x))
-            : [pkg, ...s.packages],
-        })),
-
-      resetDemoData: () => setState(initialState()),
     }),
-    [newId],
+    [refresh, lastError],
   );
 
-  const value = React.useMemo<SalonContextValue>(() => ({ ...state, actions }), [state, actions]);
+  const value = React.useMemo<SalonContextValue>(
+    () => ({ ...data, actions, pending }),
+    [data, actions, pending],
+  );
 
   return <SalonContext.Provider value={value}>{children}</SalonContext.Provider>;
 }
@@ -315,7 +323,6 @@ export function useLookups() {
   );
 }
 
-/** Invoice totals are derived, never stored — this memoises them per invoice. */
 export function useInvoiceTotals(invoice: Invoice) {
   return React.useMemo(
     () => computeTotals(invoice.lines, invoice.discount, invoice.taxRate, invoice.payments),
@@ -327,7 +334,6 @@ export function totalsOf(invoice: Invoice) {
   return computeTotals(invoice.lines, invoice.discount, invoice.taxRate, invoice.payments);
 }
 
-/** Money actually collected on an invoice (used for revenue, not billed value). */
 export function collectedOf(invoice: Invoice) {
   if (invoice.status === "VOID") return 0;
   return round2(invoice.payments.reduce((sum, p) => sum + p.amount, 0));

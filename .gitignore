@@ -32,6 +32,9 @@ yarn-error.log*
 # prisma
 /prisma/migrations/dev.db*
 
+# local embedded Postgres data (scripts/pg-dev-server.mjs)
+/.pgdata
+
 # editor
 .vscode/*
 !.vscode/extensions.json

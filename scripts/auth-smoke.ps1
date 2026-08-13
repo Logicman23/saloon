@@ -1,4 +1,4 @@
-﻿# Auth / RBAC smoke test.
+# Auth / RBAC smoke test.
 #
 #   npm run dev
 #   pwsh scripts/auth-smoke.ps1            # defaults to http://localhost:3000

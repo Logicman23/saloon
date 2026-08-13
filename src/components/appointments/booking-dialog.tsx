@@ -129,7 +129,7 @@ function BookingForm({
       current.includes(id) ? current.filter((s) => s !== id) : [...current, id],
     );
 
-  const submit = () => {
+  const submit = async () => {
     let resolvedClientId = clientId;
 
     if (quickAdd) {
@@ -137,11 +137,16 @@ function BookingForm({
         setError("Enter both a name and a phone number for the new client.");
         return;
       }
-      resolvedClientId = actions.addClient({
+      const created = await actions.addClient({
         name: newName.trim(),
         phone: newPhone.trim(),
         gender: "Female",
-      }).id;
+      });
+      if (!created) {
+        setError(actions.lastError ?? "Couldn't create that client.");
+        return;
+      }
+      resolvedClientId = created.id;
     }
 
     if (!resolvedClientId) return setError("Select a client, or add a new one.");
@@ -159,9 +164,13 @@ function BookingForm({
       notes: notes.trim() || undefined,
     };
 
-    if (appointment) actions.updateAppointment(appointment.id, payload);
-    else actions.bookAppointment(payload);
+    if (appointment) await actions.updateAppointment(appointment.id, payload);
+    else await actions.bookAppointment(payload);
 
+    if (actions.lastError) {
+      setError(actions.lastError);
+      return;
+    }
     onDone();
   };
 

@@ -15,7 +15,7 @@ import {
   startOfWeek,
   WEEKDAYS,
 } from "@/lib/date";
-import { CLOSE_HOUR, OPEN_HOUR } from "@/lib/data/seed";
+import { CLOSE_HOUR, OPEN_HOUR } from "@/lib/salon-hours";
 import { cn, formatDuration, formatMoney } from "@/lib/utils";
 import type { Appointment, Client, Service, Staff } from "@/lib/types";
 

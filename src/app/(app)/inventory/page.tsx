@@ -479,13 +479,15 @@ function AdjustStockForm({
           </Button>
           <Button
             disabled={amount <= 0}
-            onClick={() => {
-              onSubmit({
+            onClick={async () => {
+              // `staffId` is taken from the session on the server, not sent
+              // from here — the browser cannot attribute a write to someone
+              // else.
+              await onSubmit({
                 productId: product.id,
                 type,
                 qty: amount,
                 note: note.trim() || undefined,
-                staffId,
               });
               toast.success(`${product.name} updated — ${projected} ${product.unit} on hand.`);
               onCancel();

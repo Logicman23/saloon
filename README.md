@@ -11,10 +11,31 @@ Radix UI primitives · Recharts · Lucide · Prisma / PostgreSQL
 
 ## Running it
 
+The app reads and writes a real PostgreSQL database — there is no mock data.
+
 ```bash
 npm install
-npm run dev          # http://localhost:3000
+cp .env.example .env          # fill DATABASE_URL, DIRECT_URL, AUTH_SECRET
+npx prisma migrate deploy     # create the tables
+npm run db:seed               # roles, staff, catalogue + first accounts
+npm run dev                   # http://localhost:3000
 ```
+
+`db:seed` prints the generated account passwords once — store them. Set
+`OWNER_PASSWORD` / `CASHIER_PASSWORD` / `STAFF_PASSWORD` beforehand to choose
+your own.
+
+**No database to hand?** `scripts/pg-dev-server.mjs` runs Postgres in-process
+(PGlite, no Docker required):
+
+```bash
+node scripts/pg-dev-server.mjs 5433
+# then, in another shell:
+DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5433/postgres?connection_limit=1&pgbouncer=true"
+```
+
+That harness serves one connection at a time, hence `connection_limit=1`.
+It is for local work only — use Supabase or a managed Postgres in production.
 
 Other scripts:
 
@@ -27,10 +48,40 @@ Other scripts:
 | `npm run db:push`  | Push the Prisma schema to PostgreSQL  |
 | `npm run db:studio`| Prisma Studio                         |
 
-The app ships with a **deterministic demo dataset** (46 clients, 33 services,
-5 packages, 24 products, ~450 appointments, ~350 invoices, 3 months of
-expenses) so every screen is populated on first run. No database is required
-to explore the UI.
+## Data flow
+
+```
+Postgres
+   ↑ writes            ↓ reads
+server actions      src/lib/db/queries.ts   (rows → domain types)
+src/lib/actions/*   src/lib/db/metrics.ts   (SQL SUM/COUNT aggregates)
+   ↑                    ↓
+   └── SalonProvider ───┘   (render cache, never the source of truth)
+```
+
+Reads happen on the server in `(app)/layout.tsx` and are handed to the client
+provider. Writes go to server actions, which re-check the caller's permission,
+write to Postgres and `revalidatePath`; the client then refreshes.
+
+**Dashboard figures are computed by SQL, not JavaScript.** Revenue, net
+profit, appointment counts, the revenue trend and the sales-breakdown ring
+are all `SUM`/`COUNT` aggregates in `src/lib/db/metrics.ts`, with the
+previous period computed in the same round trip for the change indicators.
+No invoice rows travel to the browser just to be totalled.
+
+Revenue is **accrual** — what was billed. Money not yet collected appears
+separately as *Pending Invoices*, so the two never double-count.
+
+### Verifying the SQL
+
+```bash
+node scripts/verify-sql.mjs          # 49 assertions, no setup required
+DATABASE_URL=... node scripts/verify-writes.mjs   # 15 assertions, needs a seeded DB
+```
+
+`verify-sql.mjs` applies `prisma/migrations/0001_init/migration.sql` to a real
+Postgres engine, seeds rows and asserts every dashboard aggregate returns the
+expected figure — so a broken query fails here rather than on the dashboard.
 
 ---
 
@@ -70,10 +121,13 @@ AUTH_SECRET=…          # ≥32 chars. Production refuses to sign sessions with
 ADMIN_OVERRIDE_PIN=…   # manager PIN for cashier discount/void escalation
 ```
 
-Demo accounts live in `src/lib/auth/users.server.ts` (that file carries
-`import "server-only"`, so it is a build error if it ever reaches the client
-bundle). **Delete `DEMO_CREDENTIALS` and the login page's role switcher before
-going live.**
+Accounts live in the `users` table and are created by `npm run db:seed`.
+`src/lib/auth/users.server.ts` carries `import "server-only"`, so it is a build
+error if password handling ever reaches the client bundle. Nothing is
+hard-coded: there are no demo credentials in the source or the login page.
+
+Failed sign-ins are throttled twice over — per IP in the route handler, and
+per account in the database (10 consecutive failures locks it for 15 minutes).
 
 Verify the whole flow — 42 assertions covering redirects, role enforcement,
 forged cookies, PIN override and logout:

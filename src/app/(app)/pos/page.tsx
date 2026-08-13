@@ -254,17 +254,27 @@ function PosTerminal() {
 
   const unassigned = lines.filter((l) => l.kind !== "PRODUCT" && !l.staffId).length;
 
-  const completeSale = (payments: Payment[]) => {
+  const completeSale = async (payments: Payment[]) => {
     if (!client) return;
-    const invoice = actions.checkout({
+
+    // The server re-prices every line from the catalogue and attributes the
+    // sale to the signed-in operator, so nothing here is trusted.
+    const invoice = await actions.checkout({
       clientId: client.id,
       lines,
       discount,
       payments,
       taxRate: TAX_RATE,
-      createdByStaffId: cashierId,
       appointmentId: linkedAppointmentId,
     });
+
+    if (!invoice) {
+      toast.error("Checkout failed", {
+        description: actions.lastError ?? "The sale was not recorded. Please try again.",
+      });
+      return;
+    }
+
     setReceipt(invoice);
     setReceiptOpen(true);
     resetTicket();
