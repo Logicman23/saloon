@@ -1,0 +1,273 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   Sana's Beauty Saloon — Luxury Design Tokens
+   Obsidian black canvas, charcoal cards, metallic gold accent.
+   ========================================================================== */
+
+@theme {
+  /* Surfaces */
+  --color-obsidian: #0d0d0d;
+  --color-obsidian-elevated: #121212;
+  --color-charcoal: #1a1a1a;
+  --color-charcoal-hover: #212121;
+  --color-hairline: #262626;
+  --color-hairline-strong: #333333;
+
+  /* Metallic gold accent */
+  --color-gold: #d4af37;
+  --color-gold-light: #e5c158;
+  --color-gold-deep: #a8862a;
+
+  /* Typography colors */
+  --color-ink: #ffffff;
+  --color-muted: #a0a0a0;
+  --color-faint: #6b6b6b;
+
+  /* Status indicators */
+  --color-success: #10b981;
+  --color-success-soft: #064e3b;
+  --color-warning: #f59e0b;
+  --color-warning-soft: #4a2f05;
+  --color-danger: #e11d48;
+  --color-danger-soft: #4c0519;
+  --color-info: #38bdf8;
+
+  /* Motion */
+  --ease-luxury: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Fonts (wired up by next/font in layout.tsx) */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), "Cormorant Garamond", Georgia, serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-hairline);
+  }
+
+  html {
+    color-scheme: dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--color-obsidian);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Numeric alignment for money columns everywhere */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-gold) 35%, transparent);
+    color: #fff;
+  }
+
+  /* Slim luxury scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-hairline-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-gold-deep);
+    background-clip: content-box;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Brushed-metal gold text, used for the wordmark and headline figures */
+  .text-gilded {
+    background: linear-gradient(
+      100deg,
+      #a8862a 0%,
+      #d4af37 22%,
+      #f4e2a1 46%,
+      #d4af37 68%,
+      #a8862a 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Hairline gold divider */
+  .rule-gold {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--color-gold) 60%, transparent),
+      transparent
+    );
+  }
+
+  .glow-gold {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--color-gold) 26%, transparent),
+      0 8px 30px -8px color-mix(in srgb, var(--color-gold) 30%, transparent);
+  }
+
+  .card-surface {
+    background-color: var(--color-charcoal);
+    border: 1px solid var(--color-hairline);
+  }
+
+  /* Subtle vignette so the obsidian canvas doesn't read as flat #000 */
+  .canvas-vignette {
+    background-image:
+      radial-gradient(
+        800px 400px at 12% -8%,
+        color-mix(in srgb, var(--color-gold) 7%, transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        700px 380px at 100% 0%,
+        color-mix(in srgb, #7c3aed 5%, transparent),
+        transparent 55%
+      );
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* ============================================================================
+   Radix open/close transitions (replaces the tailwindcss-animate plugin).
+   ========================================================================== */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes dlg-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes dlg-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.dlg-overlay[data-state="open"] {
+  animation: fade-in 180ms var(--ease-luxury);
+}
+.dlg-overlay[data-state="closed"] {
+  animation: fade-out 150ms var(--ease-luxury);
+}
+.dlg-content[data-state="open"] {
+  animation: dlg-in 220ms var(--ease-luxury);
+}
+.dlg-content[data-state="closed"] {
+  animation: dlg-out 150ms var(--ease-luxury);
+}
+.pop-panel[data-state="open"] {
+  animation: pop-in 140ms var(--ease-luxury);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dlg-overlay,
+  .dlg-content,
+  .pop-panel {
+    animation: none !important;
+  }
+}
+
+/* ============================================================================
+   Thermal receipt print styles — 80mm roll.
+   Everything except [data-print-root] is hidden when printing.
+   ========================================================================== */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 0;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    width: 80mm;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  [data-print-root],
+  [data-print-root] * {
+    visibility: visible !important;
+  }
+
+  [data-print-root] {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 80mm;
+    padding: 4mm;
+    background: #fff !important;
+    color: #000 !important;
+    font-family: var(--font-mono);
+  }
+
+  [data-print-hide] {
+    display: none !important;
+  }
+}
