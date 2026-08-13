@@ -217,7 +217,55 @@ GST-registered salon.
 
 ---
 
-## Connecting a real database
+## Connecting Supabase
+
+Supabase exposes three connection strings and Prisma needs **two of them**.
+They are not interchangeable:
+
+| Env var | Which string | Port | Used for |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | Transaction pooler | **6543** | every runtime query |
+| `DIRECT_URL` | Direct (or Session pooler) | **5432** | migrations only |
+
+Dashboard → **Connect**. Two details cause most failures:
+
+- **The usernames differ.** Pooled is `postgres.[PROJECT-REF]`; direct is plain
+  `postgres`. Mixing them gives "Tenant or user not found".
+- **`?pgbouncer=true` is required on the pooled URL.** Without it Prisma uses
+  prepared statements, which pgbouncer's transaction mode can't carry, and you
+  get `prepared statement "s0" already exists`.
+
+`DIRECT_URL` must never be pooled: `prisma migrate` issues DDL and advisory
+locks that a transaction pooler drops.
+
+```bash
+cp .env.example .env      # paste both strings + AUTH_SECRET
+npm run db:check          # validates the URLs and connects before you migrate
+npm run db:setup          # = prisma migrate deploy && prisma/seed.ts
+npm run dev
+```
+
+`db:check` reports the specific fix for each failure rather than a Prisma
+stack trace — wrong port, missing `pgbouncer=true`, unencoded password
+character, IPv6-only direct host.
+
+**If `DIRECT_URL` is unreachable** your network is probably IPv4-only while
+Supabase's direct host is IPv6-only. Use the **Session pooler** instead: same
+port 5432, but the pooler host and the `postgres.[PROJECT-REF]` username.
+
+`db:seed` is idempotent — safe to re-run after adding a service or permission.
+It tops the database up without duplicating rows, and never overwrites the
+password of an account that already exists.
+
+### Why `migrate deploy` rather than `db push`
+
+This repo has a committed migration (`prisma/migrations/0001_init`).
+`prisma db push` diffs the schema straight onto the database without recording
+migration history, so a database created that way is out of sync with
+`_prisma_migrations` and the next `migrate deploy` will fail. Use `db push`
+only for throwaway prototyping against a scratch database.
+
+## Reference: schema notes
 
 `prisma/schema.prisma` is the complete PostgreSQL/Supabase model for all six
 modules — staff, clients, services, packages, products, stock movements,
