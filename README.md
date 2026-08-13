@@ -34,6 +34,55 @@ to explore the UI.
 
 ---
 
+## Authentication & RBAC
+
+Three roles, defined once in `src/lib/auth/permissions.ts`:
+
+| Role | Sees | Cannot |
+| --- | --- | --- |
+| **ADMIN** (Owner) | Everything, including P&L, expenses, staff and pricing | — |
+| **CASHIER** (Reception) | POS, calendar, client directory, invoices, read-only catalogue and stock | Financial dashboards, reports, expenses, staff, price edits, invoice voids, contact export |
+| **STAFF** (Beautician) | Own schedule, own service statuses, own commission | POS, inventory edits, expenses, client directory, everything financial |
+
+Permissions are **capabilities** (`finance.view`, `pos.operate`, …), not screens.
+Screens map to the capability they need via `ROUTE_PERMISSIONS`, so middleware,
+the sidebar and in-page guards all derive from one matrix and cannot drift.
+
+**Where enforcement actually happens**
+
+```
+src/middleware.ts          ← the real boundary. Verifies the signed cookie and
+                             the route permission before a page renders.
+src/app/(app)/layout.tsx   ← re-verifies server-side; fails closed to /login.
+<ProtectedRoute> / <Can>   ← UX only. Keeps the UI honest; never a security control.
+```
+
+The session is an HMAC-SHA256-signed token in an **httpOnly, SameSite=Lax,
+Secure** cookie, so client JavaScript — including anything injected via XSS —
+cannot read or forge it. Passwords are PBKDF2-HMAC-SHA512 at 210k iterations
+with per-user salts, compared in constant time. Unknown emails still pay the
+hashing cost so response timing cannot enumerate accounts.
+
+**Required environment** (see `.env.example`):
+
+```
+AUTH_SECRET=…          # ≥32 chars. Production refuses to sign sessions without it.
+ADMIN_OVERRIDE_PIN=…   # manager PIN for cashier discount/void escalation
+```
+
+Demo accounts live in `src/lib/auth/users.server.ts` (that file carries
+`import "server-only"`, so it is a build error if it ever reaches the client
+bundle). **Delete `DEMO_CREDENTIALS` and the login page's role switcher before
+going live.**
+
+Verify the whole flow — 42 assertions covering redirects, role enforcement,
+forged cookies, PIN override and logout:
+
+```bash
+npm run dev
+pwsh scripts/auth-smoke.ps1
+```
+
 ## Architecture
 
 ```

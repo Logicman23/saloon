@@ -25,6 +25,7 @@ import {
 } from "@/components/dashboard/charts";
 import { AppointmentStatusBadge } from "@/components/appointments/status";
 import { useLookups, useSalon } from "@/lib/data/store";
+import { ProtectedRoute } from "@/lib/auth/context";
 import {
   appointmentsOn,
   dailySeries,
@@ -42,6 +43,16 @@ import { formatDateLong, formatTime, startOfDay } from "@/lib/date";
 import { formatDuration, formatMoney, formatMoneyCompact } from "@/lib/utils";
 
 export default function DashboardPage() {
+  // The executive dashboard leads with revenue and net profit, so it carries
+  // the financial permission rather than merely requiring a session.
+  return (
+    <ProtectedRoute requires={["finance.view"]}>
+      <DashboardView />
+    </ProtectedRoute>
+  );
+}
+
+function DashboardView() {
   const { invoices, expenses, appointments, services, staff, products } = useSalon();
   const { clientById, staffById } = useLookups();
   const [period, setPeriod] = React.useState<PeriodKey>("month");

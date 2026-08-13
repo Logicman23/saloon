@@ -10,6 +10,7 @@ import { BookingDialog } from "@/components/appointments/booking-dialog";
 import { ALL_NAV_ITEMS } from "@/lib/nav";
 import { lowStockProducts } from "@/lib/data/analytics";
 import { useSalon } from "@/lib/data/store";
+import { useAuth } from "@/lib/auth/context";
 import { cn } from "@/lib/utils";
 
 export function Topbar({
@@ -21,15 +22,25 @@ export function Topbar({
 }) {
   const pathname = usePathname();
   const { products, invoices } = useSalon();
+  const { can } = useAuth();
   const [bookingOpen, setBookingOpen] = React.useState(false);
 
   const current = ALL_NAV_ITEMS.find((item) =>
     item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
   );
 
-  const lowStock = lowStockProducts(products).length;
-  const unpaid = invoices.filter((i) => i.status === "UNPAID" || i.status === "PARTIAL").length;
+  const canBook = can("appointments.manage");
+  const canCheckout = can("pos.operate");
+  const canSeeStockAlerts = can("inventory.view");
+
+  // Beauticians see neither stock nor receivables, so the bell would always
+  // read zero for them — hide it rather than show a meaningless badge.
+  const lowStock = canSeeStockAlerts ? lowStockProducts(products).length : 0;
+  const unpaid = can("invoice.view")
+    ? invoices.filter((i) => i.status === "UNPAID" || i.status === "PARTIAL").length
+    : 0;
   const alerts = lowStock + unpaid;
+  const showAlerts = canSeeStockAlerts || can("invoice.view");
 
   return (
     <>
@@ -68,39 +79,45 @@ export function Topbar({
         </button>
 
         {/* Alerts */}
-        <Link
-          href="/inventory"
-          className="relative hidden rounded-lg p-2 text-muted transition-colors hover:bg-white/5 hover:text-ink sm:block"
-          aria-label={`${alerts} alerts`}
-        >
-          <Bell className="size-5" />
-          {alerts > 0 && (
-            <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-white">
-              {alerts > 9 ? "9+" : alerts}
-            </span>
-          )}
-        </Link>
-
-        {/* Quick actions */}
-        <Button
-          variant="secondary"
-          size="default"
-          onClick={() => setBookingOpen(true)}
-          className="hidden sm:inline-flex"
-        >
-          <CalendarPlus />
-          <span className="hidden lg:inline">Quick Booking</span>
-        </Button>
-
-        <Button asChild size="default">
-          <Link href="/pos">
-            <Zap />
-            <span className="hidden lg:inline">Quick Checkout</span>
+        {showAlerts && (
+          <Link
+            href={canSeeStockAlerts ? "/inventory" : "/invoices"}
+            className="relative hidden rounded-lg p-2 text-muted transition-colors hover:bg-white/5 hover:text-ink sm:block"
+            aria-label={`${alerts} alerts`}
+          >
+            <Bell className="size-5" />
+            {alerts > 0 && (
+              <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-white">
+                {alerts > 9 ? "9+" : alerts}
+              </span>
+            )}
           </Link>
-        </Button>
+        )}
+
+        {/* Quick actions — permission-gated */}
+        {canBook && (
+          <Button
+            variant="secondary"
+            size="default"
+            onClick={() => setBookingOpen(true)}
+            className="hidden sm:inline-flex"
+          >
+            <CalendarPlus />
+            <span className="hidden lg:inline">Quick Booking</span>
+          </Button>
+        )}
+
+        {canCheckout && (
+          <Button asChild size="default">
+            <Link href="/pos">
+              <Zap />
+              <span className="hidden lg:inline">Quick Checkout</span>
+            </Link>
+          </Button>
+        )}
       </header>
 
-      <BookingDialog open={bookingOpen} onOpenChange={setBookingOpen} />
+      {canBook && <BookingDialog open={bookingOpen} onOpenChange={setBookingOpen} />}
     </>
   );
 }

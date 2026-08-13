@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/select";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { useLookups, useSalon } from "@/lib/data/store";
+import { ProtectedRoute, useAuth } from "@/lib/auth/context";
 import { inventoryValue, lowStockProducts } from "@/lib/data/analytics";
 import { formatDateTime } from "@/lib/date";
 import { cn, formatMoney, formatMoneyCompact } from "@/lib/utils";
@@ -61,8 +62,18 @@ const MOVEMENT_META: Record<
 };
 
 export default function InventoryPage() {
+  return (
+    <ProtectedRoute requires={["inventory.view"]}>
+      <InventoryView />
+    </ProtectedRoute>
+  );
+}
+
+function InventoryView() {
   const { products, stockMovements, staff, actions } = useSalon();
   const { productById, staffById } = useLookups();
+  const { can } = useAuth();
+  const canManage = can("inventory.manage");
 
   const [query, setQuery] = React.useState("");
   const [typeFilter, setTypeFilter] = React.useState("all");
@@ -130,8 +141,9 @@ export default function InventoryPage() {
             {lowStock.map((product) => (
               <button
                 key={product.id}
-                onClick={() => setAdjusting(product)}
-                className="flex items-center gap-2 rounded-lg border border-danger/25 bg-obsidian-elevated px-2.5 py-1.5 text-xs transition-colors hover:border-danger/50"
+                onClick={() => canManage && setAdjusting(product)}
+                disabled={!canManage}
+                className="flex items-center gap-2 rounded-lg border border-danger/25 bg-obsidian-elevated px-2.5 py-1.5 text-xs transition-colors enabled:hover:border-danger/50 disabled:cursor-default"
               >
                 <span className="text-ink">{product.name}</span>
                 <Badge variant="danger" className="text-[10px]">
@@ -254,9 +266,11 @@ export default function InventoryPage() {
                         {formatMoney(product.stock * product.costPrice)}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setAdjusting(product)}>
-                          Adjust
-                        </Button>
+                        {canManage && (
+                          <Button variant="ghost" size="sm" onClick={() => setAdjusting(product)}>
+                            Adjust
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

@@ -13,7 +13,8 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useSalon } from "@/lib/data/store";
-import { ALL_NAV_ITEMS } from "@/lib/nav";
+import { navItemsFor } from "@/lib/nav";
+import { useAuth } from "@/lib/auth/context";
 import { cn, formatMoney } from "@/lib/utils";
 
 interface Result {
@@ -53,16 +54,24 @@ export function CommandSearch({
 function SearchPanel({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const { clients, services, products } = useSalon();
+  const { role, can } = useAuth();
   const [query, setQuery] = React.useState("");
   const [cursor, setCursor] = React.useState(0);
   const listRef = React.useRef<HTMLDivElement>(null);
+
+  // Search is a data-access surface, not just navigation: without these
+  // gates a beautician could pull up the whole client list, including phone
+  // numbers, from the palette.
+  const searchClients = can("clients.view");
+  const searchServices = can("services.view");
+  const searchProducts = can("inventory.view");
 
   const results = React.useMemo<Result[]>(() => {
     const q = query.trim().toLowerCase();
     const digits = q.replace(/\D/g, "");
     const collected: Omit<Result, "startsGroup">[] = [];
 
-    const nav = ALL_NAV_ITEMS.map((item) => ({
+    const nav = navItemsFor(role).map((item) => ({
       id: `nav:${item.href}`,
       label: item.label,
       hint: item.description,
@@ -80,7 +89,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
         ),
       );
 
-      for (const client of clients) {
+      for (const client of searchClients ? clients : []) {
         if (
           client.name.toLowerCase().includes(q) ||
           (digits.length >= 3 && client.phone.replace(/\D/g, "").includes(digits))
@@ -96,7 +105,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
         }
       }
 
-      for (const service of services) {
+      for (const service of searchServices ? services : []) {
         if (service.name.toLowerCase().includes(q) || service.category.toLowerCase().includes(q)) {
           collected.push({
             id: `svc:${service.id}`,
@@ -109,7 +118,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
         }
       }
 
-      for (const product of products) {
+      for (const product of searchProducts ? products : []) {
         if (product.name.toLowerCase().includes(q) || product.sku.toLowerCase().includes(q)) {
           collected.push({
             id: `prd:${product.id}`,
@@ -129,7 +138,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
       ...item,
       startsGroup: index === 0 || all[index - 1].group !== item.group,
     }));
-  }, [query, clients, services, products]);
+  }, [query, clients, services, products, role, searchClients, searchServices, searchProducts]);
 
   const commit = React.useCallback(
     (result: Result | undefined) => {

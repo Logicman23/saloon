@@ -6,7 +6,10 @@ import { usePathname } from "next/navigation";
 import { ChevronsLeft, LogOut, Settings, X } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Avatar } from "@/components/ui/misc";
-import { NAV_SECTIONS } from "@/lib/nav";
+import { Badge } from "@/components/ui/badge";
+import { navSectionsFor } from "@/lib/nav";
+import { useAuth } from "@/lib/auth/context";
+import { ROLE_META } from "@/lib/auth/permissions";
 import { cn } from "@/lib/utils";
 
 export function Sidebar({
@@ -21,6 +24,11 @@ export function Sidebar({
   onCloseMobile: () => void;
 }) {
   const pathname = usePathname();
+  const { user, role, roleLabel, signOut } = useAuth();
+
+  // Links the signed-in role cannot reach are never rendered — the matching
+  // server-side rule lives in `ROUTE_PERMISSIONS`.
+  const sections = React.useMemo(() => navSectionsFor(role), [role]);
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
@@ -66,7 +74,7 @@ export function Sidebar({
 
         {/* Nav */}
         <nav className="no-scrollbar flex-1 overflow-y-auto px-3 py-4">
-          {NAV_SECTIONS.map((section) => (
+          {sections.map((section) => (
             <div key={section.title} className="mb-5 last:mb-0">
               {!collapsed && (
                 <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
@@ -123,12 +131,12 @@ export function Sidebar({
               collapsed && "justify-center p-0 py-2",
             )}
           >
-            <Avatar name="Sana Malik" size="sm" ring />
+            <Avatar name={user.name} size="sm" ring />
             {!collapsed && (
               <>
                 <div className="min-w-0 flex-1 leading-tight">
-                  <p className="truncate text-sm font-medium text-ink">Sana Malik</p>
-                  <p className="truncate text-xs text-faint">Owner</p>
+                  <p className="truncate text-sm font-medium text-ink">{user.name}</p>
+                  <p className="truncate text-xs text-faint">{roleLabel}</p>
                 </div>
                 <div className="flex items-center">
                   <button
@@ -138,6 +146,7 @@ export function Sidebar({
                     <Settings className="size-4" />
                   </button>
                   <button
+                    onClick={() => void signOut()}
                     className="rounded-md p-1.5 text-faint hover:bg-white/5 hover:text-danger"
                     aria-label="Sign out"
                   >
@@ -147,6 +156,22 @@ export function Sidebar({
               </>
             )}
           </div>
+
+          {!collapsed && (
+            <div className="mt-1 px-2">
+              <Badge
+                variant="neutral"
+                className="w-full justify-center py-1 text-[10px]"
+                style={{ color: ROLE_META[role].accent }}
+              >
+                <span
+                  className="size-1.5 rounded-full bg-current"
+                  aria-hidden
+                />
+                {role} ACCESS
+              </Badge>
+            </div>
+          )}
 
           <button
             onClick={onToggleCollapsed}

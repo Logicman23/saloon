@@ -1,8 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Inter } from "next/font/google";
 import { Toaster } from "sonner";
-import { AppShell } from "@/components/layout/app-shell";
-import { SalonProvider } from "@/lib/data/store";
 import { SALON } from "@/lib/nav";
 import "./globals.css";
 
@@ -29,6 +27,8 @@ export const metadata: Metadata = {
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
   },
+  // The management console must never be indexed.
+  robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {
@@ -37,13 +37,15 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+/**
+ * Root layout holds only document chrome. Session-aware providers live in
+ * `(app)/layout.tsx` so the login screen can render without them.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${display.variable}`}>
       <body className="antialiased">
-        <SalonProvider>
-          <AppShell>{children}</AppShell>
-        </SalonProvider>
+        {children}
 
         <Toaster
           position="bottom-right"

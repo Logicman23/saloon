@@ -30,6 +30,8 @@ import { PaymentDialog } from "@/components/pos/payment-dialog";
 import { ReceiptDialog } from "@/components/pos/receipt";
 import { ClientPicker } from "@/components/pos/client-picker";
 import { useSalon } from "@/lib/data/store";
+import { ProtectedRoute, useAuth } from "@/lib/auth/context";
+import { useAdminOverride } from "@/components/auth/admin-override";
 import { applyPromo, computeTotals } from "@/lib/billing";
 import { appointmentsOn } from "@/lib/data/analytics";
 import { formatTime, startOfDay } from "@/lib/date";
@@ -39,14 +41,28 @@ import type { Client, DiscountState, Invoice, InvoiceLine, Payment } from "@/lib
 const TAX_RATE = 0; // Services are un-taxed here; set to 16 for GST-registered salons.
 
 export default function PosPage() {
+  return (
+    <ProtectedRoute requires={["pos.operate"]}>
+      <PosTerminal />
+    </ProtectedRoute>
+  );
+}
+
+/** Discounts above this need a manager PIN when the operator is a cashier. */
+const DISCOUNT_THRESHOLD_PERCENT = 15;
+
+function PosTerminal() {
   const { staff, services, clients, appointments, promoCodes, actions } = useSalon();
+  const { user, can } = useAuth();
+  const { authorize, dialog: overrideDialog } = useAdminOverride();
 
   const [client, setClient] = React.useState<Client | null>(null);
   const [lines, setLines] = React.useState<InvoiceLine[]>([]);
   const [discount, setDiscount] = React.useState<DiscountState>({ kind: "NONE", value: 0 });
   const [promoInput, setPromoInput] = React.useState("");
   const [promoError, setPromoError] = React.useState("");
-  const [cashierId, setCashierId] = React.useState("stf_rabia");
+  // The operator bills as themselves; only an admin may bill as someone else.
+  const [cashierId, setCashierId] = React.useState(user.staffId ?? "stf_rabia");
   const [linkedAppointmentId, setLinkedAppointmentId] = React.useState<string | undefined>();
 
   const [paymentOpen, setPaymentOpen] = React.useState(false);
@@ -195,6 +211,30 @@ export default function PosPage() {
   const setDiscountKind = (kind: DiscountState["kind"]) => {
     setPromoError("");
     setDiscount(kind === "NONE" ? { kind: "NONE", value: 0 } : { kind, value: 0 });
+  };
+
+  /**
+   * Applies a manual discount, escalating to a manager PIN once it exceeds
+   * the standard threshold. `authorize` resolves instantly for roles that
+   * already hold `pos.discount.override`.
+   */
+  const applyManualDiscount = async (value: number) => {
+    const asPercent =
+      discount.kind === "PERCENT"
+        ? value
+        : totals.netSubtotal > 0
+          ? (value / totals.netSubtotal) * 100
+          : 0;
+
+    if (asPercent > DISCOUNT_THRESHOLD_PERCENT) {
+      const granted = await authorize(
+        "pos.discount.override",
+        `Discount of ${asPercent.toFixed(0)}% exceeds the ${DISCOUNT_THRESHOLD_PERCENT}% limit for your role.`,
+      );
+      if (!granted) return;
+    }
+
+    setDiscount((current) => ({ ...current, value: Math.max(0, value) }));
   };
 
   const redeemPromo = () => {
@@ -356,6 +396,9 @@ export default function PosPage() {
                     onChange={(e) =>
                       setDiscount({ ...discount, value: Math.max(0, Number(e.target.value) || 0) })
                     }
+                    // Escalation happens on commit, not on every keystroke,
+                    // so the PIN prompt cannot fire mid-typing.
+                    onBlur={(e) => void applyManualDiscount(Math.max(0, Number(e.target.value) || 0))}
                     className="tabular h-9 pl-9 text-right"
                   />
                 </div>
@@ -421,7 +464,8 @@ export default function PosPage() {
               {TAX_RATE > 0 && (
                 <TotalRow label={`Tax (${TAX_RATE}%)`} value={formatMoney(totals.tax)} />
               )}
-              {totals.commissionTotal > 0 && (
+              {/* Commission is salon cost data — cashiers don't see it. */}
+              {totals.commissionTotal > 0 && can("commissions.view.all") && (
                 <TotalRow
                   label="Staff commission"
                   value={formatMoney(totals.commissionTotal)}
@@ -437,21 +481,27 @@ export default function PosPage() {
               </div>
             </div>
 
-            {/* Cashier */}
+            {/* Cashier — only an admin may attribute a bill to someone else. */}
             <div className="flex items-center gap-2">
               <Label className="shrink-0">Billed by</Label>
-              <Select value={cashierId} onValueChange={setCashierId}>
-                <SelectTrigger className="h-8 flex-1 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeStaff.map((member) => (
-                    <SelectItem key={member.id} value={member.id}>
-                      {member.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {can("staff.manage") ? (
+                <Select value={cashierId} onValueChange={setCashierId}>
+                  <SelectTrigger className="h-8 flex-1 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeStaff.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <span className="flex-1 truncate rounded-lg border border-hairline bg-obsidian-elevated px-3 py-1.5 text-xs text-muted">
+                  {user.name}
+                </span>
+              )}
             </div>
 
             {unassigned > 0 && (
@@ -487,6 +537,8 @@ export default function PosPage() {
         onOpenChange={setReceiptOpen}
         onNewSale={resetTicket}
       />
+
+      {overrideDialog}
     </div>
   );
 }

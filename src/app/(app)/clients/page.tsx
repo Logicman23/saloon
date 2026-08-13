@@ -29,6 +29,7 @@ import { KpiCard } from "@/components/dashboard/kpi-card";
 import { BookingDialog } from "@/components/appointments/booking-dialog";
 import { AppointmentStatusBadge, InvoiceStatusBadge } from "@/components/appointments/status";
 import { useLookups, useSalon } from "@/lib/data/store";
+import { ProtectedRoute, useAuth } from "@/lib/auth/context";
 import { clientStats, collected } from "@/lib/data/analytics";
 import { totalsOf } from "@/lib/data/store";
 import { formatDate, formatDateTime } from "@/lib/date";
@@ -37,15 +38,18 @@ import type { Client } from "@/lib/types";
 
 export default function ClientsPage() {
   return (
-    <React.Suspense fallback={null}>
-      <ClientsView />
-    </React.Suspense>
+    <ProtectedRoute requires={["clients.view"]}>
+      <React.Suspense fallback={null}>
+        <ClientsView />
+      </React.Suspense>
+    </ProtectedRoute>
   );
 }
 
 function ClientsView() {
   const params = useSearchParams();
   const { clients, invoices, appointments, actions } = useSalon();
+  const { can } = useAuth();
 
   const [query, setQuery] = React.useState("");
   // Seeded from the command palette's deep link (?focus=cli_007) on first
@@ -115,9 +119,11 @@ function ClientsView() {
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
-            <Button onClick={() => setAddOpen(true)}>
-              <UserPlus /> Add client
-            </Button>
+            {can("clients.manage") && (
+              <Button onClick={() => setAddOpen(true)}>
+                <UserPlus /> Add client
+              </Button>
+            )}
           </>
         }
       />

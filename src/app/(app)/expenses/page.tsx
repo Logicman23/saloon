@@ -44,6 +44,7 @@ import {
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { PAYMENT_META } from "@/components/pos/payment-dialog";
 import { useLookups, useSalon } from "@/lib/data/store";
+import { ProtectedRoute, useAuth } from "@/lib/auth/context";
 import { percentChange, periodRange, previousRange, summarize } from "@/lib/data/analytics";
 import { dateKey, formatDate, startOfMonth } from "@/lib/date";
 import { cn, formatMoney, formatMoneyCompact } from "@/lib/utils";
@@ -55,7 +56,16 @@ import {
 } from "@/lib/types";
 
 export default function ExpensesPage() {
+  return (
+    <ProtectedRoute requires={["expenses.view"]}>
+      <ExpensesView />
+    </ProtectedRoute>
+  );
+}
+
+function ExpensesView() {
   const { expenses, invoices, appointments, staff, actions } = useSalon();
+  const { can } = useAuth();
   const { staffById } = useLookups();
 
   const [query, setQuery] = React.useState("");
@@ -195,9 +205,11 @@ export default function ExpensesPage() {
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
-            <Button onClick={() => setAddOpen(true)}>
-              <Plus /> Record expense
-            </Button>
+            {can("expenses.manage") && (
+              <Button onClick={() => setAddOpen(true)}>
+                <Plus /> Record expense
+              </Button>
+            )}
           </>
         }
       />
@@ -260,16 +272,18 @@ export default function ExpensesPage() {
                   {formatMoney(expense.amount)}
                 </TableCell>
                 <TableCell className="text-right">
-                  <button
-                    onClick={() => {
-                      actions.deleteExpense(expense.id);
-                      toast.success("Expense removed.");
-                    }}
-                    className="rounded-md p-1.5 text-faint transition-colors hover:bg-danger/10 hover:text-danger"
-                    aria-label="Delete expense"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
+                  {can("expenses.manage") && (
+                    <button
+                      onClick={() => {
+                        actions.deleteExpense(expense.id);
+                        toast.success("Expense removed.");
+                      }}
+                      className="rounded-md p-1.5 text-faint transition-colors hover:bg-danger/10 hover:text-danger"
+                      aria-label="Delete expense"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

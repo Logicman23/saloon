@@ -7,11 +7,20 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, SectionHeading } from "@/components/ui/misc";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { useSalon } from "@/lib/data/store";
+import { ProtectedRoute } from "@/lib/auth/context";
 import { periodRange, staffPerformance, summarize } from "@/lib/data/analytics";
 import { formatDate } from "@/lib/date";
 import { formatMoney, formatMoneyCompact } from "@/lib/utils";
 
 export default function StaffPage() {
+  return (
+    <ProtectedRoute requires={["staff.view"]}>
+      <StaffView />
+    </ProtectedRoute>
+  );
+}
+
+function StaffView() {
   const { staff, invoices, appointments, expenses } = useSalon();
 
   const now = React.useMemo(() => new Date(), []);

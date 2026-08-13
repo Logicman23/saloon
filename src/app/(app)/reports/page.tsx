@@ -25,6 +25,7 @@ import {
   RevenueTrendChart,
 } from "@/components/dashboard/charts";
 import { useSalon } from "@/lib/data/store";
+import { ProtectedRoute } from "@/lib/auth/context";
 import {
   dailySeries,
   monthlySeries,
@@ -41,6 +42,14 @@ import { formatDate } from "@/lib/date";
 import { formatMoney, formatMoneyCompact } from "@/lib/utils";
 
 export default function ReportsPage() {
+  return (
+    <ProtectedRoute requires={["reports.view"]}>
+      <ReportsView />
+    </ProtectedRoute>
+  );
+}
+
+function ReportsView() {
   const { invoices, expenses, appointments, services, staff } = useSalon();
   const [period, setPeriod] = React.useState<PeriodKey>("month");
 
