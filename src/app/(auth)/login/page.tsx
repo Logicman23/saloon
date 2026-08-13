@@ -42,11 +42,35 @@ const ERROR_COPY: Record<string, { title: string; description: string }> = {
     title: "Check your details",
     description: "Enter both an email address and a password.",
   },
+  server_misconfigured: {
+    title: "Server not configured",
+    description:
+      "AUTH_SECRET is missing or too short on the server, so sessions can't be signed. This is a deployment setting, not your password.",
+  },
+  server_error: {
+    title: "Server error",
+    description: "The sign-in service failed. Check the server logs — your credentials are fine.",
+  },
   network: {
     title: "Connection problem",
     description: "Couldn't reach the server. Check your connection and retry.",
   },
 };
+
+/**
+ * Maps a failed response to copy.
+ *
+ * Falls back on the *status code* rather than assuming bad credentials: a 5xx
+ * with an empty body used to surface as "wrong password", which points the
+ * user at entirely the wrong problem.
+ */
+function errorFor(status: number, code?: string) {
+  if (code && ERROR_COPY[code]) return ERROR_COPY[code];
+  if (status >= 500) return ERROR_COPY.server_error;
+  if (status === 429) return ERROR_COPY.too_many_attempts;
+  if (status === 400) return ERROR_COPY.invalid_request;
+  return ERROR_COPY.invalid_credentials;
+}
 
 const DEMO_LOGINS: Array<{
   role: Role;
@@ -103,8 +127,8 @@ function LoginView() {
         };
 
         if (!response.ok) {
-          const copy = ERROR_COPY[data.error ?? ""] ?? ERROR_COPY.invalid_credentials;
-          toast.error(copy.title, { description: copy.description });
+          const copy = errorFor(response.status, data.error);
+          toast.error(copy.title, { description: copy.description, duration: 8000 });
           setPending(null);
           return;
         }

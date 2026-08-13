@@ -97,16 +97,27 @@ export async function POST(request: Request) {
   clearThrottle(ip);
 
   const maxAge = remember ? REMEMBER_MAX_AGE : SHIFT_MAX_AGE;
-  const token = await signSession(
-    {
-      sub: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      staffId: user.staffId,
-    },
-    maxAge,
-  );
+
+  let token: string;
+  try {
+    token = await signSession(
+      {
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        staffId: user.staffId,
+      },
+      maxAge,
+    );
+  } catch (error) {
+    // Almost always a missing or too-short AUTH_SECRET in production. Report
+    // it as its own condition — falling through to a generic failure here
+    // makes a deployment problem look like a wrong password, which sends
+    // people hunting for the wrong bug.
+    console.error("[auth] failed to sign session:", error);
+    return NextResponse.json({ error: "server_misconfigured" }, { status: 500 });
+  }
 
   const response = NextResponse.json({
     user: {
