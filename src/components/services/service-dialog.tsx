@@ -113,7 +113,12 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <form onSubmit={submit}>
+    // The flex classes are load-bearing. DialogContent is a clipped flex
+    // column whose children are expected to be the header, body and footer;
+    // a plain <form> in between breaks that chain, so DialogBody stops
+    // scrolling and the footer is clipped out of view the moment the content
+    // grows — which is exactly when a price is typed and the summary appears.
+    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
       <DialogHeader>
         <DialogTitle>New service</DialogTitle>
         <DialogDescription>
@@ -257,7 +262,11 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
         <Button type="button" variant="ghost" onClick={onDone} disabled={saving}>
           Cancel
         </Button>
-        <Button type="submit" disabled={saving || Boolean(duplicate)}>
+        {/* Disabled only while the write is in flight. Blocking on `duplicate`
+            left the button dead with nothing but a small hint to explain it;
+            letting the click through puts the reason in the footer, next to
+            the control the person just pressed. */}
+        <Button type="submit" disabled={saving}>
           {saving && <Loader2 className="animate-spin" />}
           {saving ? "Saving…" : "Add service"}
         </Button>

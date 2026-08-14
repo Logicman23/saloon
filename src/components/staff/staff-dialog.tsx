@@ -123,7 +123,9 @@ function StaffForm({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <form onSubmit={submit}>
+    // See service-dialog: without these, DialogBody cannot scroll and the
+    // footer is clipped as soon as the commission preview appears.
+    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
       <DialogHeader>
         <DialogTitle>New team member</DialogTitle>
         <DialogDescription>
