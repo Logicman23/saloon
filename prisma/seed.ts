@@ -41,9 +41,14 @@ function describe(key: Permission) {
 
 const generated: Array<{ label: string; email: string; password: string }> = [];
 
-function passwordFor(envKey: string, label: string, email: string) {
-  const supplied = process.env[envKey];
-  if (supplied) return supplied;
+/** A password explicitly supplied through the environment, if any. */
+function suppliedPassword(envKey: string): string | undefined {
+  const value = process.env[envKey]?.trim();
+  return value ? value : undefined;
+}
+
+/** Invents a strong password and records it for the summary printed at the end. */
+function generatePassword(label: string, email: string) {
   const password = `${randomBytes(9).toString("base64url")}!Aa1`;
   generated.push({ label, email, password });
   return password;
@@ -136,7 +141,7 @@ async function main() {
   const accounts = [
     {
       id: "usr_owner",
-      email: process.env.OWNER_EMAIL ?? "owner@sanasbeauty.pk",
+      email: process.env.OWNER_EMAIL ?? "admin@sana.com",
       name: "Sana Malik",
       roleKey: "ADMIN" as const,
       staffId: "stf_sana",
@@ -146,7 +151,7 @@ async function main() {
     },
     {
       id: "usr_reception",
-      email: process.env.CASHIER_EMAIL ?? "reception@sanasbeauty.pk",
+      email: process.env.CASHIER_EMAIL ?? "cashier@sana.com",
       name: "Rabia Sattar",
       roleKey: "CASHIER" as const,
       staffId: "stf_rabia",
@@ -156,7 +161,7 @@ async function main() {
     },
     {
       id: "usr_ayesha",
-      email: process.env.STAFF_EMAIL ?? "ayesha@sanasbeauty.pk",
+      email: process.env.STAFF_EMAIL ?? "ayesha@sana.com",
       name: "Ayesha Khan",
       roleKey: "STAFF" as const,
       staffId: "stf_ayesha",
@@ -168,12 +173,37 @@ async function main() {
 
   for (const account of accounts) {
     const existing = await prisma.user.findUnique({ where: { email: account.email } });
+    const supplied = suppliedPassword(account.envKey);
+
     if (existing) {
-      console.log(`• ${account.email} already exists — password left unchanged`);
+      // Never overwrite a live password with a randomly generated one — that
+      // would lock the owner out of their own salon on any re-run. But when a
+      // password was named explicitly, resetting it is the whole intent.
+      if (!supplied) {
+        console.log(`• ${account.email} already exists — password left unchanged`);
+        continue;
+      }
+
+      const { salt, hash } = hashPassword(supplied);
+      await prisma.user.update({
+        where: { email: account.email },
+        data: {
+          passwordHash: hash,
+          passwordSalt: salt,
+          name: account.name,
+          active: true,
+          // Clear any lockout, so a forgotten password cannot leave the
+          // account unreachable after the reset.
+          failedLoginCount: 0,
+          lockedUntil: null,
+          roleId: roleIds.get(account.roleKey)!,
+        },
+      });
+      console.log(`✔ ${account.email} password reset from ${account.envKey}`);
       continue;
     }
 
-    const password = passwordFor(account.envKey, account.label, account.email);
+    const password = supplied ?? generatePassword(account.label, account.email);
     const { salt, hash } = hashPassword(password);
 
     await prisma.user.create({
