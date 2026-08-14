@@ -14,11 +14,13 @@ import {
   updateAppointmentAction,
   updateClientNotesAction,
 } from "@/lib/actions/salon";
+import { createProductAction, createServiceAction } from "@/lib/actions/catalog";
 import { checkoutAction } from "@/lib/actions/pos";
 import type {
   Appointment,
   AppointmentStatus,
   Client,
+  ServiceCategory,
   DiscountState,
   Expense,
   Invoice,
@@ -106,6 +108,28 @@ interface SalonActions {
     qty: number;
     note?: string;
   }) => Promise<void>;
+
+  addProduct: (input: {
+    name: string;
+    sku: string;
+    type: Product["type"];
+    brand: string;
+    unit: string;
+    costPrice: number;
+    retailPrice: number;
+    stock: number;
+    lowStockThreshold: number;
+    supplier?: string;
+  }) => Promise<Product | null>;
+
+  addService: (input: {
+    name: string;
+    category: ServiceCategory;
+    durationMin: number;
+    price: number;
+    description?: string;
+    active: boolean;
+  }) => Promise<Service | null>;
 
   /** Last error from a server action, for surfacing in the UI. */
   lastError: string | null;
@@ -288,6 +312,28 @@ export function SalonProvider({
           setLastError(null);
           refresh();
         }
+      },
+
+      addProduct: async (input) => {
+        const result = await createProductAction(input);
+        if (!result.ok) {
+          setLastError(result.error);
+          return null;
+        }
+        setLastError(null);
+        refresh();
+        return result.data;
+      },
+
+      addService: async (input) => {
+        const result = await createServiceAction(input);
+        if (!result.ok) {
+          setLastError(result.error);
+          return null;
+        }
+        setLastError(null);
+        refresh();
+        return result.data;
       },
     }),
     [refresh, lastError],

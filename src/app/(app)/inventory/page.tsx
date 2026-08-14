@@ -44,6 +44,7 @@ import {
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { useLookups, useSalon } from "@/lib/data/store";
 import { ProtectedRoute, useAuth } from "@/lib/auth/context";
+import { ProductDialog } from "@/components/inventory/product-dialog";
 import { inventoryValue, lowStockProducts } from "@/lib/data/analytics";
 import { formatDateTime } from "@/lib/date";
 import { cn, formatMoney, formatMoneyCompact } from "@/lib/utils";
@@ -78,6 +79,7 @@ function InventoryView() {
   const [query, setQuery] = React.useState("");
   const [typeFilter, setTypeFilter] = React.useState("all");
   const [adjusting, setAdjusting] = React.useState<Product | null>(null);
+  const [productOpen, setProductOpen] = React.useState(false);
 
   const q = query.trim().toLowerCase();
 
@@ -159,17 +161,29 @@ function InventoryView() {
         title="Inventory"
         description="Retail shelf stock and back-bar consumables with a full movement log."
         actions={
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-            <Input
-              className="w-56 pl-9"
-              placeholder="Name, brand or SKU…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+              <Input
+                className="w-56 pl-9"
+                placeholder="Name, brand or SKU…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            {/* Presentation only — createProductAction re-checks the same
+                capability, since a server action is a callable endpoint. */}
+            {canManage && (
+              <Button onClick={() => setProductOpen(true)}>
+                <PackagePlus />
+                New product
+              </Button>
+            )}
           </div>
         }
       />
+
+      <ProductDialog open={productOpen} onOpenChange={setProductOpen} />
 
       <Tabs defaultValue="stock">
         <TabsList>

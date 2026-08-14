@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Clock, Layers, Search, Sparkles, Tag } from "lucide-react";
+import { Clock, Layers, Plus, Search, Sparkles, Tag } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, SectionHeading } from "@/components/ui/misc";
@@ -17,13 +18,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useSalon } from "@/lib/data/store";
+import { useAuth } from "@/lib/auth/context";
+import { ServiceDialog } from "@/components/services/service-dialog";
 import { SERVICE_CATEGORIES } from "@/lib/types";
 import { cn, formatDuration, formatMoney } from "@/lib/utils";
 
 export default function ServicesPage() {
   const { services, packages } = useSalon();
+  const { can } = useAuth();
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState("all");
+  const [serviceOpen, setServiceOpen] = React.useState(false);
 
   const q = query.trim().toLowerCase();
 
@@ -56,17 +61,29 @@ export default function ServicesPage() {
         title="Service catalogue"
         description="Pricing, chair time and bundled package deals."
         actions={
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-            <Input
-              className="w-56 pl-9"
-              placeholder="Search services…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+              <Input
+                className="w-56 pl-9"
+                placeholder="Search services…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            {/* Presentation only — createServiceAction re-checks the same
+                capability, since a server action is a callable endpoint. */}
+            {can("services.manage") && (
+              <Button onClick={() => setServiceOpen(true)}>
+                <Plus />
+                New service
+              </Button>
+            )}
           </div>
         }
       />
+
+      <ServiceDialog open={serviceOpen} onOpenChange={setServiceOpen} />
 
       {/* Category summary */}
       <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
