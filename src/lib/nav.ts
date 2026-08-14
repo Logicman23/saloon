@@ -162,13 +162,21 @@ export function navItemsFor(role: Role): NavItem[] {
   return navSectionsFor(role).flatMap((section) => section.items);
 }
 
+/**
+ * The salon's own details. Printed on every client receipt and PDF invoice,
+ * so anything placeholder here goes out to customers — treat a wrong value
+ * as a live defect, not cosmetic.
+ *
+ * `ntn` and `instagram` render only when non-empty, so an unknown value is
+ * left blank rather than invented: a receipt with no tax number is a gap, but
+ * one carrying a made-up registration is a misstatement.
+ */
 export const SALON = {
   name: "Sana's Beauty Saloon",
   shortName: "Sana's",
   tagline: "Beauty & Bridal Studio",
-  address: "12-C Main Boulevard, Gulberg III, Lahore",
-  phone: "042-3577 1234",
-  mobile: "0300-1234567",
+  address: "Comercial Market B Block, Nadeem Plaza, Satellite Town, Rawalpindi",
+  phone: "0301-0810943",
   instagram: "@sanasbeautysaloon",
-  ntn: "SBS-4410927",
+  ntn: "",
 } as const;

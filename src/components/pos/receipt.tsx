@@ -104,10 +104,8 @@ export function ThermalReceipt({ invoice }: { invoice: Invoice }) {
         <p className="text-[15px] font-bold uppercase tracking-wide">{SALON.name}</p>
         <p className="mt-0.5 text-[10px] uppercase tracking-[0.15em]">{SALON.tagline}</p>
         <p className="mt-1.5 text-[9px] leading-snug">{SALON.address}</p>
-        <p className="text-[9px]">
-          Tel: {SALON.phone} · {SALON.mobile}
-        </p>
-        <p className="text-[9px]">NTN: {SALON.ntn}</p>
+        <p className="text-[9px]">Tel: {SALON.phone}</p>
+        {SALON.ntn && <p className="text-[9px]">NTN: {SALON.ntn}</p>}
       </div>
 
       <div className="my-2 border-t border-black/40" />
@@ -215,7 +213,7 @@ export function ThermalReceipt({ invoice }: { invoice: Invoice }) {
       {/* Footer */}
       <div className="space-y-1 text-center">
         <p className="text-[11px] font-bold">Thank you for visiting</p>
-        <p className="text-[10px]">{SALON.instagram}</p>
+        {SALON.instagram && <p className="text-[10px]">{SALON.instagram}</p>}
         <p className="mt-1.5 text-[8px] leading-snug text-black/60">
           Services once rendered are non-refundable. Retail products may be exchanged within 7 days
           with this receipt.

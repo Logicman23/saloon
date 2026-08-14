@@ -76,8 +76,10 @@ export function generateReceiptPdf(
     doc.text(text, W / 2, y, { align: "center" });
     y += 2.8;
   }
-  centre(`Tel: ${SALON.phone}  ·  ${SALON.mobile}`, 6.6, "normal", 3.2);
-  centre(`NTN: ${SALON.ntn}`, 6.6, "normal", 4);
+  // The trailing gap moves onto the Tel line when there is no NTN, so the
+  // rule below the header keeps its spacing either way.
+  centre(`Tel: ${SALON.phone}`, 6.6, "normal", SALON.ntn ? 3.2 : 4);
+  if (SALON.ntn) centre(`NTN: ${SALON.ntn}`, 6.6, "normal", 4);
 
   line();
 
@@ -186,7 +188,7 @@ export function generateReceiptPdf(
   /* ------------------------------------------------------------ Footer */
 
   centre("Thank you for visiting", 8, "bold", 3.8);
-  centre(SALON.instagram, 7, "normal", 3.6);
+  if (SALON.instagram) centre(SALON.instagram, 7, "normal", 3.6);
   doc.setFontSize(6);
   for (const text of doc.splitTextToSize(
     "Services once rendered are non-refundable. Retail products may be exchanged within 7 days with this receipt.",
