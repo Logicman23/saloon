@@ -89,7 +89,7 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
     setError("");
     setSaving(true);
     try {
-      const created = await actions.addService({
+      const result = await actions.addService({
         name: name.trim(),
         category,
         durationMin: duration,
@@ -98,12 +98,14 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
         active,
       });
 
-      if (!created) {
-        setError(actions.lastError ?? "Couldn't save that service.");
+      // The action's own message, not a generic apology — it names the field,
+      // the clash or the unreachable database.
+      if (!result.ok) {
+        setError(result.error);
         return;
       }
 
-      toast.success(`${created.name} added to the catalogue.`);
+      toast.success(`${result.data.name} added to the catalogue.`);
       onDone();
     } finally {
       setSaving(false);

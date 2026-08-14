@@ -1,13 +1,15 @@
 "use client";
 
 import * as React from "react";
-import { CalendarCheck, Percent, Phone, Scissors, Users, Wallet } from "lucide-react";
+import { CalendarCheck, Percent, Phone, Scissors, UserPlus, Users, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, SectionHeading } from "@/components/ui/misc";
+import { Button } from "@/components/ui/button";
 import { KpiCard } from "@/components/dashboard/kpi-card";
+import { StaffDialog } from "@/components/staff/staff-dialog";
 import { useSalon } from "@/lib/data/store";
-import { ProtectedRoute } from "@/lib/auth/context";
+import { ProtectedRoute, useAuth } from "@/lib/auth/context";
 import { periodRange, staffPerformance, summarize } from "@/lib/data/analytics";
 import { formatDate } from "@/lib/date";
 import { formatMoney, formatMoneyCompact } from "@/lib/utils";
@@ -22,6 +24,8 @@ export default function StaffPage() {
 
 function StaffView() {
   const { staff, invoices, appointments, expenses } = useSalon();
+  const { can } = useAuth();
+  const [staffOpen, setStaffOpen] = React.useState(false);
 
   const now = React.useMemo(() => new Date(), []);
   const range = React.useMemo(() => periodRange("month", now), [now]);
@@ -77,7 +81,18 @@ function StaffView() {
       <SectionHeading
         title="The team"
         description={`Performance for ${range.label.toLowerCase()} — ${formatDate(range.from)} onward.`}
+        actions={
+          /* Presentation only — createStaffAction re-checks staff.manage. */
+          can("staff.manage") ? (
+            <Button onClick={() => setStaffOpen(true)}>
+              <UserPlus />
+              New member
+            </Button>
+          ) : undefined
+        }
       />
+
+      <StaffDialog open={staffOpen} onOpenChange={setStaffOpen} />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {staff.map((member) => {

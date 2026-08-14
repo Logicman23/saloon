@@ -86,7 +86,7 @@ function ProductForm({ onDone }: { onDone: () => void }) {
     setError("");
     setSaving(true);
     try {
-      const created = await actions.addProduct({
+      const result = await actions.addProduct({
         name: name.trim(),
         sku: sku.trim().toUpperCase(),
         type,
@@ -99,12 +99,14 @@ function ProductForm({ onDone }: { onDone: () => void }) {
         supplier: supplier.trim() || undefined,
       });
 
-      if (!created) {
-        setError(actions.lastError ?? "Couldn't save that product.");
+      // The action's own message, not a generic apology — it names the field,
+      // the clashing SKU or the unreachable database.
+      if (!result.ok) {
+        setError(result.error);
         return;
       }
 
-      toast.success(`${created.name} added to inventory.`);
+      toast.success(`${result.data.name} added to inventory.`);
       onDone();
     } finally {
       // In a finally block so a thrown action cannot strand the button in its

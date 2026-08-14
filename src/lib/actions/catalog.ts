@@ -11,7 +11,7 @@ import {
   type ActionResult,
 } from "@/lib/actions/guard";
 import { SERVICE_CATEGORIES } from "@/lib/types";
-import type { Product, Service } from "@/lib/types";
+import type { Product, Service, ServicePackage } from "@/lib/types";
 
 /**
  * Creating catalogue records: retail/back-bar products and bookable services.
@@ -201,6 +201,92 @@ export async function createServiceAction(
         price: Number(service.price),
         description: service.description ?? undefined,
         active: service.active,
+      },
+    };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/* -------------------------------------------------------------- Packages */
+
+const PackageSchema = z.object({
+  name: z.string().trim().min(2, "must be at least 2 characters").max(160),
+  description: z.string().trim().max(500).optional(),
+  price: z.number().nonnegative("cannot be negative").max(100_000_000),
+  serviceIds: z
+    .array(z.string().min(1))
+    .min(2, "a package needs at least two services")
+    .max(20, "cannot bundle more than 20 services"),
+  active: z.boolean(),
+});
+
+export async function createPackageAction(
+  input: z.infer<typeof PackageSchema>,
+): Promise<ActionResult<ServicePackage>> {
+  try {
+    const session = await requirePermission("services.manage");
+    const data = PackageSchema.parse(input);
+
+    // Duplicate ids would silently collapse into one row on the composite
+    // primary key, so a package would quietly hold fewer services than the
+    // person building it selected.
+    const serviceIds = [...new Set(data.serviceIds)];
+
+    // Verify every id before writing. A missing one would otherwise surface as
+    // a foreign-key violation halfway through the transaction, naming a column
+    // rather than the service that has since been deleted.
+    const found = await prisma.service.findMany({
+      where: { id: { in: serviceIds } },
+      select: { id: true, name: true, price: true },
+    });
+    if (found.length !== serviceIds.length) {
+      return { ok: false, error: "One of those services no longer exists. Reopen and reselect." };
+    }
+
+    const pkg = await prisma.$transaction(async (tx) => {
+      const created = await tx.servicePackage.create({
+        data: {
+          name: data.name,
+          description: data.description || null,
+          price: data.price,
+          active: data.active,
+        },
+      });
+
+      await tx.packageService.createMany({
+        data: serviceIds.map((serviceId) => ({ packageId: created.id, serviceId })),
+      });
+
+      return created;
+    });
+
+    const fullPrice = found.reduce((sum, s) => sum + Number(s.price), 0);
+
+    await recordAudit("PRICE_CHANGED", session, {
+      entityType: "ServicePackage",
+      entityId: pkg.id,
+      metadata: {
+        created: true,
+        name: data.name,
+        price: data.price,
+        fullPrice,
+        services: serviceIds.length,
+      },
+    });
+
+    revalidatePath("/services");
+    revalidatePath("/pos");
+
+    return {
+      ok: true,
+      data: {
+        id: pkg.id,
+        name: pkg.name,
+        description: pkg.description ?? undefined,
+        price: Number(pkg.price),
+        serviceIds,
+        active: pkg.active,
       },
     };
   } catch (error) {

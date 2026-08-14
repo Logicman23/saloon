@@ -61,6 +61,10 @@ const STAFF_ROLE: Record<string, StaffRole> = {
   RECEPTIONIST: "Receptionist",
 };
 
+export const STAFF_ROLE_TO_DB = Object.fromEntries(
+  Object.entries(STAFF_ROLE).map(([db, label]) => [label, db]),
+) as Record<StaffRole, string>;
+
 const EXPENSE_CATEGORY: Record<string, ExpenseCategory> = {
   RENT: "Rent",
   ELECTRICITY: "Electricity",

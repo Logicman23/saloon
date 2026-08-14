@@ -20,6 +20,7 @@ import {
 import { useSalon } from "@/lib/data/store";
 import { useAuth } from "@/lib/auth/context";
 import { ServiceDialog } from "@/components/services/service-dialog";
+import { PackageDialog } from "@/components/services/package-dialog";
 import { SERVICE_CATEGORIES } from "@/lib/types";
 import { cn, formatDuration, formatMoney } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ export default function ServicesPage() {
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState("all");
   const [serviceOpen, setServiceOpen] = React.useState(false);
+  const [packageOpen, setPackageOpen] = React.useState(false);
 
   const q = query.trim().toLowerCase();
 
@@ -74,16 +76,23 @@ export default function ServicesPage() {
             {/* Presentation only — createServiceAction re-checks the same
                 capability, since a server action is a callable endpoint. */}
             {can("services.manage") && (
-              <Button onClick={() => setServiceOpen(true)}>
-                <Plus />
-                New service
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => setPackageOpen(true)}>
+                  <Layers />
+                  New deal
+                </Button>
+                <Button onClick={() => setServiceOpen(true)}>
+                  <Plus />
+                  New service
+                </Button>
+              </>
             )}
           </div>
         }
       />
 
       <ServiceDialog open={serviceOpen} onOpenChange={setServiceOpen} />
+      <PackageDialog open={packageOpen} onOpenChange={setPackageOpen} />
 
       {/* Category summary */}
       <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-5">

@@ -13,8 +13,13 @@ import {
   setAppointmentStatusAction,
   updateAppointmentAction,
   updateClientNotesAction,
+  createStaffAction,
 } from "@/lib/actions/salon";
-import { createProductAction, createServiceAction } from "@/lib/actions/catalog";
+import {
+  createPackageAction,
+  createProductAction,
+  createServiceAction,
+} from "@/lib/actions/catalog";
 import { checkoutAction } from "@/lib/actions/pos";
 import type {
   Appointment,
@@ -44,6 +49,13 @@ import type {
  * the updated snapshot back down. React state is a render cache here, never
  * the source of truth.
  */
+
+/**
+ * Outcome of a write. Structurally identical to the server's `ActionResult`,
+ * redeclared here so this client module never imports from a `server-only`
+ * file — even for a type.
+ */
+export type SaveResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export interface SalonData {
   staff: Staff[];
@@ -120,7 +132,7 @@ interface SalonActions {
     stock: number;
     lowStockThreshold: number;
     supplier?: string;
-  }) => Promise<Product | null>;
+  }) => Promise<SaveResult<Product>>;
 
   addService: (input: {
     name: string;
@@ -129,7 +141,26 @@ interface SalonActions {
     price: number;
     description?: string;
     active: boolean;
-  }) => Promise<Service | null>;
+  }) => Promise<SaveResult<Service>>;
+
+  addPackage: (input: {
+    name: string;
+    description?: string;
+    price: number;
+    serviceIds: string[];
+    active: boolean;
+  }) => Promise<SaveResult<ServicePackage>>;
+
+  addStaff: (input: {
+    name: string;
+    role: Staff["role"];
+    phone: string;
+    email?: string;
+    commissionRate: number;
+    specialties: ServiceCategory[];
+    monthlySalary: number;
+    active: boolean;
+  }) => Promise<SaveResult<{ id: string }>>;
 
   /** Last error from a server action, for surfacing in the UI. */
   lastError: string | null;
@@ -154,6 +185,28 @@ export function SalonProvider({
   const refresh = React.useCallback(() => {
     startTransition(() => router.refresh());
   }, [router]);
+
+  /**
+   * Records the outcome and hands the result straight back to the caller.
+   *
+   * Returning the error rather than only parking it in `lastError` matters:
+   * `actions` is memoised, so a form that awaits an action and then reads
+   * `actions.lastError` reads the copy captured in its own render — which is
+   * still the previous value. Every failure then shows a stale or generic
+   * message, which is precisely when an accurate one is worth most.
+   */
+  const finish = React.useCallback(
+    <T,>(result: SaveResult<T>): SaveResult<T> => {
+      if (result.ok) {
+        setLastError(null);
+        refresh();
+      } else {
+        setLastError(result.error);
+      }
+      return result;
+    },
+    [refresh],
+  );
 
   const actions = React.useMemo<SalonActions>(
     () => ({
@@ -314,29 +367,12 @@ export function SalonProvider({
         }
       },
 
-      addProduct: async (input) => {
-        const result = await createProductAction(input);
-        if (!result.ok) {
-          setLastError(result.error);
-          return null;
-        }
-        setLastError(null);
-        refresh();
-        return result.data;
-      },
-
-      addService: async (input) => {
-        const result = await createServiceAction(input);
-        if (!result.ok) {
-          setLastError(result.error);
-          return null;
-        }
-        setLastError(null);
-        refresh();
-        return result.data;
-      },
+      addProduct: async (input) => finish(await createProductAction(input)),
+      addService: async (input) => finish(await createServiceAction(input)),
+      addPackage: async (input) => finish(await createPackageAction(input)),
+      addStaff: async (input) => finish(await createStaffAction(input)),
     }),
-    [refresh, lastError],
+    [refresh, finish, lastError],
   );
 
   const value = React.useMemo<SalonContextValue>(

@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db/client";
-import { EXPENSE_CATEGORY_TO_DB } from "@/lib/db/queries";
+import {
+  EXPENSE_CATEGORY_TO_DB,
+  SERVICE_CATEGORY_TO_DB,
+  STAFF_ROLE_TO_DB,
+} from "@/lib/db/queries";
 import { roleCan } from "@/lib/auth/permissions";
 import {
   failure,
@@ -328,6 +332,82 @@ export async function adjustStockAction(
 
     revalidatePath("/inventory");
     return { ok: true, data: { stock: result.stock } };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/* ------------------------------------------------------------------ Staff */
+
+const StaffSchema = z.object({
+  name: z.string().trim().min(2, "must be at least 2 characters").max(120),
+  role: z.enum([
+    "Owner",
+    "Senior Stylist",
+    "Stylist",
+    "Beautician",
+    "Nail Technician",
+    "Makeup Artist",
+    "Receptionist",
+  ]),
+  phone: z.string().trim().min(6, "must be at least 6 digits").max(30),
+  email: z.string().trim().email("is not a valid address").max(160).optional().or(z.literal("")),
+  // Stored as a fraction, entered as a percentage. Decimal(4,3) would happily
+  // hold up to 9.999 — a 999% commission — so this bound is the business rule,
+  // not the column's. Postgres will not catch a misplaced decimal point here.
+  commissionRate: z.number().min(0, "cannot be negative").max(0.999, "cannot reach 100%"),
+  specialties: z.array(z.enum(["Hair", "Skin", "Makeup", "Nails", "Spa"])).max(5),
+  monthlySalary: z.number().nonnegative("cannot be negative").max(100_000_000),
+  active: z.boolean(),
+});
+
+export async function createStaffAction(
+  input: z.infer<typeof StaffSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const session = await requirePermission("staff.manage");
+    const data = StaffSchema.parse(input);
+
+    const dbRole = STAFF_ROLE_TO_DB[data.role];
+    if (!dbRole) return { ok: false, error: "Unknown staff role." };
+
+    // `email` carries a unique index, but only when present — checking first
+    // names the colleague already holding it instead of failing on the index.
+    if (data.email) {
+      const clash = await prisma.staff.findUnique({
+        where: { email: data.email },
+        select: { name: true },
+      });
+      if (clash) {
+        return { ok: false, error: `${clash.name} already uses that email address.` };
+      }
+    }
+
+    const member = await prisma.staff.create({
+      data: {
+        name: data.name,
+        role: dbRole as never,
+        phone: data.phone,
+        email: data.email || null,
+        commissionRate: data.commissionRate,
+        specialties: data.specialties.map(
+          (c) => SERVICE_CATEGORY_TO_DB[c],
+        ) as never,
+        monthlySalary: data.monthlySalary,
+        active: data.active,
+      },
+      select: { id: true },
+    });
+
+    await recordAudit("ROLE_CHANGED", session, {
+      entityType: "Staff",
+      entityId: member.id,
+      metadata: { created: true, name: data.name, role: data.role },
+    });
+
+    revalidatePath("/staff");
+    revalidatePath("/appointments");
+    return { ok: true, data: member };
   } catch (error) {
     return failure(error);
   }
