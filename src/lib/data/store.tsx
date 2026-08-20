@@ -13,6 +13,8 @@ import {
   setAppointmentStatusAction,
   updateAppointmentAction,
   updateClientNotesAction,
+  updateClientAction,
+  archiveClientAction,
   createStaffAction,
   updateStaffAction,
 } from "@/lib/actions/salon";
@@ -98,6 +100,14 @@ export interface PackageInput {
   active: boolean;
 }
 
+export interface ClientInput {
+  name: string;
+  phone: string;
+  email?: string;
+  notes?: string;
+  gender?: Client["gender"];
+}
+
 export interface StaffInput {
   name: string;
   role: Staff["role"];
@@ -124,14 +134,15 @@ export interface SalonData {
 }
 
 interface SalonActions {
-  addClient: (input: {
-    name: string;
-    phone: string;
-    email?: string;
-    notes?: string;
-    gender?: Client["gender"];
-  }) => Promise<Client | null>;
-  updateClient: (id: string, patch: { notes?: string }) => Promise<void>;
+  addClient: (input: ClientInput) => Promise<Client | null>;
+  updateClient: (id: string, input: ClientInput) => Promise<SaveResult<{ id: string; name: string }>>;
+  /**
+   * Notes only, kept separate from `updateClient` because the detail dialog
+   * saves them on their own and they are deliberately not audit-logged.
+   */
+  updateClientNotes: (id: string, patch: { notes?: string }) => Promise<void>;
+  /** Soft delete — the row is retired, not dropped. Refused if a booking is due. */
+  archiveClient: (id: string) => Promise<SaveResult<{ name: string }>>;
 
   bookAppointment: (input: {
     clientId: string;
@@ -262,7 +273,10 @@ export function SalonProvider({
         };
       },
 
-      updateClient: async (id, patch) => {
+      updateClient: async (id, input) => finish(await updateClientAction(id, input)),
+      archiveClient: async (id) => finish(await archiveClientAction(id)),
+
+      updateClientNotes: async (id, patch) => {
         const result = await updateClientNotesAction(id, patch.notes ?? "");
         if (!result.ok) setLastError(result.error);
         else {

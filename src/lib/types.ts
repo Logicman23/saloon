@@ -43,6 +43,11 @@ export interface Client {
   notes?: string;
   tags: string[];
   createdAt: string;
+  /**
+   * Retired. Still resolvable by id so past bookings, invoices and receipts
+   * keep their name — every screen listing the client base filters these out.
+   */
+  archived?: boolean;
 }
 
 /* ------------------------------------------------------- Services & bundles */

@@ -38,8 +38,11 @@ export function ClientPicker({
     return clients
       .filter(
         (c) =>
-          c.name.toLowerCase().includes(q) ||
-          (digits.length >= 3 && c.phone.replace(/\D/g, "").includes(digits)),
+          // Archived clients are unsellable-to but still resolve above, so an
+          // invoice already raised against one keeps their name on the ticket.
+          !c.archived &&
+          (c.name.toLowerCase().includes(q) ||
+            (digits.length >= 3 && c.phone.replace(/\D/g, "").includes(digits))),
       )
       .slice(0, 5);
   }, [query, clients]);

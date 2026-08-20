@@ -90,6 +90,10 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
       );
 
       for (const client of searchClients ? clients : []) {
+        // Same as services below — archived clients stay in the list so past
+        // bookings resolve, but jumping to one would land on a row that is
+        // no longer in the directory.
+        if (client.archived) continue;
         if (
           client.name.toLowerCase().includes(q) ||
           (digits.length >= 3 && client.phone.replace(/\D/g, "").includes(digits))

@@ -2,7 +2,18 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { CalendarPlus, Phone, Search, TrendingUp, UserPlus, Users } from "lucide-react";
+import { toast } from "sonner";
+import {
+  CalendarPlus,
+  Loader2,
+  Pencil,
+  Phone,
+  Search,
+  Trash2,
+  TrendingUp,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
@@ -25,6 +36,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { BookingDialog } from "@/components/appointments/booking-dialog";
 import { AppointmentStatusBadge, InvoiceStatusBadge } from "@/components/appointments/status";
@@ -57,6 +76,31 @@ function ClientsView() {
   const [selectedId, setSelectedId] = React.useState<string | null>(() => params.get("focus"));
   const [addOpen, setAddOpen] = React.useState(false);
   const [bookingOpen, setBookingOpen] = React.useState(false);
+  const [editingClient, setEditingClient] = React.useState<Client | null>(null);
+  const [removingClient, setRemovingClient] = React.useState<Client | null>(null);
+
+  const canManage = can("clients.manage");
+
+  /**
+   * The directory, minus anyone retired.
+   *
+   * `clients` deliberately still carries archived rows — appointments,
+   * invoices and receipts resolve a name through the id — so every view
+   * presenting the *client base* filters them here.
+   */
+  const live = React.useMemo(() => clients.filter((c) => !c.archived), [clients]);
+
+  /** The blocker `archiveClientAction` refuses on, surfaced before the click. */
+  const upcomingForRemoval = React.useMemo(() => {
+    if (!removingClient) return 0;
+    const now = new Date().toISOString();
+    return appointments.filter(
+      (a) =>
+        a.clientId === removingClient.id &&
+        a.start >= now &&
+        (a.status === "SCHEDULED" || a.status === "IN_PROGRESS"),
+    ).length;
+  }, [removingClient, appointments]);
 
   const selected = React.useMemo(
     () => clients.find((c) => c.id === selectedId) ?? null,
@@ -70,7 +114,7 @@ function ClientsView() {
   const rows = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     const digits = q.replace(/\D/g, "");
-    return clients
+    return live
       .filter(
         (c) =>
           !q ||
@@ -80,16 +124,16 @@ function ClientsView() {
       )
       .map((client) => ({ client, stats: clientStats(invoices, appointments, client.id) }))
       .sort((a, b) => b.stats.totalSpend - a.stats.totalSpend);
-  }, [clients, invoices, appointments, query]);
+  }, [live, invoices, appointments, query]);
 
   const totalLifetime = rows.reduce((sum, r) => sum + r.stats.totalSpend, 0);
-  const vipCount = clients.filter((c) => c.tags.includes("VIP")).length;
+  const vipCount = live.filter((c) => c.tags.includes("VIP")).length;
   const withBalance = rows.filter((r) => r.stats.outstanding > 0).length;
 
   return (
     <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Total clients" value={String(clients.length)} icon={Users} tone="gold" />
+        <KpiCard label="Total clients" value={String(live.length)} icon={Users} tone="gold" />
         <KpiCard
           label="Lifetime value"
           value={formatMoneyCompact(totalLifetime)}
@@ -140,11 +184,12 @@ function ClientsView() {
               <TableHead className="text-right">Avg ticket</TableHead>
               <TableHead>Last visit</TableHead>
               <TableHead className="text-right">Balance</TableHead>
+              <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 && (
-              <TableEmpty colSpan={8}>No client matches “{query}”.</TableEmpty>
+              <TableEmpty colSpan={9}>No client matches “{query}”.</TableEmpty>
             )}
             {rows.slice(0, 60).map(({ client, stats }) => (
               <TableRow
@@ -189,6 +234,36 @@ function ClientsView() {
                     <span className="text-faint">—</span>
                   )}
                 </TableCell>
+                <TableCell className="text-right">
+                  {canManage && (
+                    /* The row itself opens the profile, so these must not
+                       bubble — otherwise every edit click opens the dialog
+                       behind the one it just opened. */
+                    <div
+                      className="flex items-center justify-end gap-0.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditingClient(client)}
+                      >
+                        <Pencil />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title={`Delete ${client.name}`}
+                        className="hover:bg-danger/10 hover:text-danger"
+                        onClick={() => setRemovingClient(client)}
+                      >
+                        <Trash2 />
+                        <span className="sr-only">Delete {client.name}</span>
+                      </Button>
+                    </div>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -207,7 +282,46 @@ function ClientsView() {
         onBook={() => setBookingOpen(true)}
       />
 
-      <AddClientDialog open={addOpen} onOpenChange={setAddOpen} onAdd={actions.addClient} />
+      <ClientDialog open={addOpen} onOpenChange={setAddOpen} />
+      <ClientDialog
+        client={editingClient}
+        open={Boolean(editingClient)}
+        onOpenChange={(open) => !open && setEditingClient(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(removingClient)}
+        onOpenChange={(open) => !open && setRemovingClient(null)}
+        title="Delete this client?"
+        description={
+          removingClient
+            ? `${removingClient.name} will come off the directory, the search and the booking picker.`
+            : undefined
+        }
+        confirmLabel="Delete client"
+        pendingLabel="Deleting…"
+        confirmDisabled={upcomingForRemoval > 0}
+        onConfirm={async () => {
+          if (!removingClient) return;
+          const result = await actions.archiveClient(removingClient.id);
+          if (!result.ok) return result.error;
+          toast.success(`${result.data.name} removed from the directory.`);
+        }}
+      >
+        <p className="text-sm text-muted">
+          Their visit history and invoices are kept — the record is retired, not erased, so past
+          bookings and printed receipts still show the name.
+        </p>
+
+        {upcomingForRemoval > 0 && (
+          <p className="rounded-lg border border-danger/25 bg-danger/[0.06] p-3 text-sm text-danger">
+            {upcomingForRemoval === 1
+              ? "This client has an upcoming booking."
+              : `This client has ${upcomingForRemoval} upcoming bookings.`}{" "}
+            Complete or cancel {upcomingForRemoval === 1 ? "it" : "them"} first.
+          </p>
+        )}
+      </ConfirmDialog>
 
       <BookingDialog open={bookingOpen} onOpenChange={setBookingOpen} />
     </div>
@@ -425,7 +539,7 @@ function ClientDetailBody({
           <Button
             variant="secondary"
             onClick={() => {
-              actions.updateClient(client.id, { notes: notes.trim() || undefined });
+              actions.updateClientNotes(client.id, { notes: notes.trim() || undefined });
               onClose();
             }}
           >
@@ -444,64 +558,139 @@ function ClientDetailBody({
   );
 }
 
-/* ---------------------------------------------------------- Add client */
+/* ------------------------------------------------------ Add / edit client */
 
-function AddClientDialog({
+const GENDERS = ["Female", "Male", "Other"] as const;
+
+function ClientDialog({
+  client = null,
   open,
   onOpenChange,
-  onAdd,
 }: {
+  /** Omitted to register a new client; supplied to edit that one. */
+  client?: Client | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdd: ReturnType<typeof useSalon>["actions"]["addClient"];
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="default">
-        {/* Unmounted while closed, so the fields start empty each time. */}
-        <AddClientForm onCancel={() => onOpenChange(false)} onAdd={onAdd} />
+        {/* Keyed so opening a second client cannot inherit the first's state. */}
+        <ClientForm
+          key={client?.id ?? "new"}
+          client={client}
+          onDone={() => onOpenChange(false)}
+        />
       </DialogContent>
     </Dialog>
   );
 }
 
-function AddClientForm({
-  onCancel,
-  onAdd,
-}: {
-  onCancel: () => void;
-  onAdd: ReturnType<typeof useSalon>["actions"]["addClient"];
-}) {
-  const [name, setName] = React.useState("");
-  const [phone, setPhone] = React.useState("");
-  const [email, setEmail] = React.useState("");
+function ClientForm({ client, onDone }: { client: Client | null; onDone: () => void }) {
+  const { actions } = useSalon();
+  const editing = client !== null;
+
+  const [name, setName] = React.useState(client?.name ?? "");
+  const [phone, setPhone] = React.useState(client?.phone ?? "");
+  const [email, setEmail] = React.useState(client?.email ?? "");
+  const [gender, setGender] = React.useState<NonNullable<Client["gender"]>>(
+    client?.gender ?? "Female",
+  );
+  // Editing leaves notes alone: they have their own save in the detail dialog,
+  // and duplicating the field here would let a stale copy overwrite them.
   const [notes, setNotes] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (saving) return;
+
+    if (name.trim().length < 2) return setError("Enter the client's name.");
+    if (phone.trim().length < 6) return setError("Enter a contact number.");
+
+    setError("");
+    setSaving(true);
+    try {
+      const payload = {
+        name: name.trim(),
+        phone: phone.trim(),
+        email: email.trim() || undefined,
+        gender,
+      };
+
+      if (client) {
+        const result = await actions.updateClient(client.id, payload);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        toast.success(`${name.trim()} updated.`);
+      } else {
+        // addClient resolves null on failure and parks the reason in the
+        // store — the previous version fired and closed regardless, so a
+        // duplicate number looked like it had worked.
+        const added = await actions.addClient({ ...payload, notes: notes.trim() || undefined });
+        if (!added) {
+          setError(actions.lastError ?? "Could not add that client.");
+          return;
+        }
+        toast.success(`${name.trim()} added to the directory.`);
+      }
+      onDone();
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <>
-        <DialogHeader>
-          <DialogTitle>Add a client</DialogTitle>
-        </DialogHeader>
-        <DialogBody className="space-y-3">
-          <Field label="Full name">
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ayesha Khan" />
-          </Field>
-          <Field label="Phone">
-            <Input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              inputMode="tel"
-              placeholder="0300-1234567"
-            />
-          </Field>
-          <Field label="Email (optional)">
-            <Input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              type="email"
-              placeholder="ayesha@example.com"
-            />
-          </Field>
+    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+      <DialogHeader>
+        <DialogTitle>{editing ? `Edit ${client.name}` : "Add a client"}</DialogTitle>
+      </DialogHeader>
+      <DialogBody className="space-y-3">
+        <Field label="Full name">
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Ayesha Khan"
+          />
+        </Field>
+        <Field label="Phone">
+          <Input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            inputMode="tel"
+            placeholder="0300-1234567"
+          />
+        </Field>
+        <Field label="Email (optional)">
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            placeholder="ayesha@example.com"
+          />
+        </Field>
+        <Field label="Gender">
+          <Select
+            value={gender}
+            onValueChange={(v) => setGender(v as NonNullable<Client["gender"]>)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {GENDERS.map((g) => (
+                <SelectItem key={g} value={g}>
+                  {g}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        {!editing && (
           <Field label="Notes (optional)">
             <Textarea
               rows={2}
@@ -510,28 +699,23 @@ function AddClientForm({
               placeholder="Preferences, allergies…"
             />
           </Field>
-        </DialogBody>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            disabled={!name.trim() || !phone.trim()}
-            onClick={() => {
-              onAdd({
-                name: name.trim(),
-                phone: phone.trim(),
-                email: email.trim() || undefined,
-                notes: notes.trim() || undefined,
-                gender: "Female",
-              });
-              onCancel();
-            }}
-          >
-            Add client
-          </Button>
-        </DialogFooter>
-    </>
+        )}
+      </DialogBody>
+      <DialogFooter>
+        {error && (
+          <p className="mr-auto self-center text-sm text-danger" role="alert">
+            {error}
+          </p>
+        )}
+        <Button type="button" variant="ghost" onClick={onDone} disabled={saving}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={saving || !name.trim() || !phone.trim()}>
+          {saving && <Loader2 className="animate-spin" />}
+          {saving ? "Saving…" : editing ? "Save changes" : "Add client"}
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
 

@@ -105,9 +105,13 @@ function BookingForm({
   const priceTotal = selectedServices.reduce((sum, s) => sum + s.price, 0);
 
   const filteredClients = React.useMemo(() => {
+    // Archived clients are excluded here but not from `selectedClient` below:
+    // a retired record must not be bookable, while an appointment that already
+    // references one still has to render their name.
+    const bookable = clients.filter((c) => !c.archived);
     const q = clientQuery.trim().toLowerCase();
-    if (!q) return clients.slice(0, 6);
-    return clients
+    if (!q) return bookable.slice(0, 6);
+    return bookable
       .filter(
         (c) =>
           c.name.toLowerCase().includes(q) || c.phone.replace(/\D/g, "").includes(q.replace(/\D/g, "")),

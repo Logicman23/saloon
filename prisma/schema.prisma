@@ -124,6 +124,12 @@ enum AuditAction {
   CATALOG_UPDATED
   /// A catalogue record was soft-deleted. The row survives; see `archived_at`.
   CATALOG_ARCHIVED
+  /// A client's own details were edited — name, phone, email, gender. Notes
+  /// are excluded: they are appended constantly during a visit and would bury
+  /// every other client event under stylist shorthand.
+  CLIENT_UPDATED
+  /// A client was soft-deleted. The row survives; see `archived_at`.
+  CLIENT_ARCHIVED
 }
 
 /* ------------------------------------------------- Identity & access control
@@ -291,20 +297,27 @@ model Staff {
 }
 
 model Client {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String   @unique
-  email     String?
-  gender    String?
-  notes     String?
-  tags      String[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id         String    @id @default(cuid())
+  name       String
+  phone      String    @unique
+  email      String?
+  gender     String?
+  notes      String?
+  tags       String[]
+  /// Soft delete. `invoices` is onDelete: Restrict, so Postgres refuses to
+  /// drop anyone who has ever been billed; `appointments` is onDelete: Cascade,
+  /// so a delete that did succeed would take their whole booking history with
+  /// it. Archived clients still resolve by id on past bookings, invoices and
+  /// receipts — see `getClients`.
+  archivedAt DateTime? @map("archived_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
 
   appointments Appointment[]
   invoices     Invoice[]
 
   @@index([name])
+  @@index([archivedAt])
   @@map("clients")
 }
 

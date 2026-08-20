@@ -79,6 +79,144 @@ export async function updateClientNotesAction(
   }
 }
 
+/**
+ * The client's own details. Notes keep their own action deliberately — they
+ * are saved constantly from the detail dialog during a visit, and routing them
+ * through here would audit-log stylist shorthand over every real change.
+ */
+export async function updateClientAction(
+  clientId: string,
+  input: z.infer<typeof ClientSchema>,
+): Promise<ActionResult<{ id: string; name: string }>> {
+  try {
+    const session = await requirePermission("clients.manage");
+    const data = ClientSchema.parse(input);
+
+    const existing = await prisma.client.findUnique({ where: { id: clientId } });
+    if (!existing || existing.archivedAt) {
+      return { ok: false, error: "That client no longer exists — they may have been removed." };
+    }
+
+    // Same natural key as create, minus themselves. Without the exclusion,
+    // saving a client whose number has not changed reports them as clashing
+    // with their own record.
+    if (data.phone !== existing.phone) {
+      const clash = await prisma.client.findUnique({
+        where: { phone: data.phone },
+        select: { name: true },
+      });
+      if (clash) {
+        return { ok: false, error: `${clash.name} is already registered on that number.` };
+      }
+    }
+
+    const changes = diff(
+      {
+        name: existing.name,
+        phone: existing.phone,
+        email: existing.email ?? undefined,
+        gender: existing.gender ?? undefined,
+      },
+      {
+        name: data.name,
+        phone: data.phone,
+        email: data.email || undefined,
+        gender: data.gender ?? undefined,
+      },
+    );
+
+    const client = await prisma.client.update({
+      where: { id: clientId },
+      data: {
+        name: data.name,
+        phone: data.phone,
+        email: data.email || null,
+        ...(data.gender ? { gender: data.gender } : {}),
+      },
+      select: { id: true, name: true },
+    });
+
+    if (Object.keys(changes).length > 0) {
+      await recordAudit("CLIENT_UPDATED", session, {
+        entityType: "Client",
+        entityId: clientId,
+        metadata: { name: data.name, changes },
+      });
+    }
+
+    revalidatePath("/clients");
+    revalidatePath("/appointments");
+    revalidatePath("/invoices");
+    return { ok: true, data: client };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/**
+ * Soft delete, with the one dependency check worth making before the click.
+ *
+ * Archiving sidesteps both foreign keys — the RESTRICT on invoices and the
+ * CASCADE on appointments — which is exactly why an upcoming booking has to be
+ * refused deliberately here. Nothing else stops a client vanishing off the
+ * client list while still holding a chair on Thursday.
+ *
+ * An outstanding balance is deliberately NOT a blocker: money owed by someone
+ * who has stopped coming is the ordinary reason to retire a record, and the
+ * invoice keeps resolving their name either way.
+ */
+export async function archiveClientAction(
+  clientId: string,
+): Promise<ActionResult<{ name: string }>> {
+  try {
+    const session = await requirePermission("clients.manage");
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { name: true, phone: true, archivedAt: true },
+    });
+    if (!client) return { ok: false, error: "That client no longer exists." };
+    // Idempotent, so a double-click or a second manager on the same record is
+    // a no-op rather than an error neither of them can act on.
+    if (client.archivedAt) return { ok: true, data: { name: client.name } };
+
+    const upcoming = await prisma.appointment.count({
+      where: {
+        clientId,
+        start: { gte: new Date() },
+        status: { in: ["SCHEDULED", "IN_PROGRESS"] },
+      },
+    });
+
+    if (upcoming > 0) {
+      return {
+        ok: false,
+        error:
+          upcoming === 1
+            ? "This client has an upcoming booking. Complete or cancel it first."
+            : `This client has ${upcoming} upcoming bookings. Complete or cancel them first.`,
+      };
+    }
+
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { archivedAt: new Date() },
+    });
+
+    await recordAudit("CLIENT_ARCHIVED", session, {
+      entityType: "Client",
+      entityId: clientId,
+      metadata: { name: client.name, phone: client.phone },
+    });
+
+    revalidatePath("/clients");
+    revalidatePath("/appointments");
+    return { ok: true, data: { name: client.name } };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
 /* ----------------------------------------------------------- Appointments */
 
 const BookingSchema = z.object({

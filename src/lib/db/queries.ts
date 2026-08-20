@@ -99,6 +99,16 @@ export const getStaff = cache(async (): Promise<Staff[]> => {
   }));
 });
 
+/**
+ * Archived clients are returned, not filtered — the same exception
+ * `getServices` makes, for the same reason.
+ *
+ * A client id is a live reference: appointments, invoices, the commission
+ * report and printed receipts all resolve a name through it. Filtering
+ * archived rows out here would blank the name on every historical booking and
+ * bill. The flag travels with the row, and the screens that present the
+ * *client base* — this page's list, search, the booking picker — exclude it.
+ */
 export const getClients = cache(async (): Promise<Client[]> => {
   const rows = await prisma.client.findMany({ orderBy: { name: "asc" } });
   return rows.map((c) => ({
@@ -110,6 +120,7 @@ export const getClients = cache(async (): Promise<Client[]> => {
     notes: c.notes ?? undefined,
     tags: c.tags,
     createdAt: c.createdAt.toISOString(),
+    archived: c.archivedAt !== null,
   }));
 });
 
