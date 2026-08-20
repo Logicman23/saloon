@@ -33,6 +33,32 @@ export interface Staff {
   joinedAt: string;
 }
 
+/**
+ * A login, as the user-management screen sees it.
+ *
+ * Deliberately carries no password material — `passwordHash` and
+ * `passwordSalt` never leave `users.server.ts`, so nothing here can reach a
+ * client bundle even by accident.
+ */
+export interface AppUser {
+  id: string;
+  email: string;
+  name: string;
+  /** ADMIN | CASHIER | STAFF — the access tier. */
+  role: string;
+  /** The chair this login is attached to, if any. */
+  staffId?: string;
+  /** That chair's job title, resolved for display. */
+  designation?: StaffRole;
+  active: boolean;
+  /** Set while the account is locked out after repeated failed sign-ins. */
+  lockedUntil?: string;
+  lastLoginAt?: string;
+  /** True for the seeded owner role, which cannot be deleted or demoted. */
+  isSystemRole: boolean;
+  createdAt: string;
+}
+
 export interface Client {
   id: string;
   name: string;

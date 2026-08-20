@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import {
   CalendarCheck,
   Pencil,
   Percent,
   Phone,
   Scissors,
+  ShieldCheck,
   UserPlus,
   Users,
   Wallet,
@@ -33,6 +35,7 @@ export default function StaffPage() {
 }
 
 function StaffView() {
+  const router = useRouter();
   const { staff, invoices, appointments, expenses } = useSalon();
   const { can } = useAuth();
   const canManage = can("staff.manage");
@@ -96,10 +99,18 @@ function StaffView() {
         actions={
           /* Presentation only — createStaffAction re-checks staff.manage. */
           canManage ? (
-            <Button onClick={() => setStaffOpen(true)}>
-              <UserPlus />
-              New member
-            </Button>
+            <div className="flex items-center gap-2">
+              {can("users.manage") && (
+                <Button variant="outline" onClick={() => router.push("/staff/users")}>
+                  <ShieldCheck />
+                  Logins & access
+                </Button>
+              )}
+              <Button onClick={() => setStaffOpen(true)}>
+                <UserPlus />
+                New member
+              </Button>
+            </div>
           ) : undefined
         }
       />

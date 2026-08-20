@@ -4,6 +4,7 @@ import { prisma, toNumber } from "@/lib/db/client";
 import type {
   Appointment,
   AppointmentStatus,
+  AppUser,
   Client,
   Expense,
   ExpenseCategory,
@@ -51,7 +52,7 @@ export const SERVICE_CATEGORY_TO_DB: Record<ServiceCategory, "HAIR" | "SKIN" | "
   Spa: "SPA",
 };
 
-const STAFF_ROLE: Record<string, StaffRole> = {
+export const STAFF_ROLE: Record<string, StaffRole> = {
   OWNER: "Owner",
   SENIOR_STYLIST: "Senior Stylist",
   STYLIST: "Stylist",
@@ -98,6 +99,42 @@ export const getStaff = cache(async (): Promise<Staff[]> => {
     joinedAt: s.joinedAt.toISOString(),
   }));
 });
+
+/**
+ * Every login, for the user-management screen.
+ *
+ * Not `cache`d alongside the rest and deliberately not loaded into the salon
+ * store: this is the only read in the app that is meaningful to exactly one
+ * role, and putting it in the provider would ship the staff list's account
+ * status to every cashier's browser. The page fetches it itself, behind its
+ * own permission check.
+ */
+export async function getUsers(): Promise<AppUser[]> {
+  const rows = await prisma.user.findMany({
+    orderBy: [{ active: "desc" }, { name: "asc" }],
+    include: {
+      role: { select: { key: true, isSystem: true } },
+      staff: { select: { role: true } },
+    },
+  });
+
+  return rows.map((u) => ({
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: u.role.key,
+    staffId: u.staffId ?? undefined,
+    designation: u.staff ? (STAFF_ROLE[u.staff.role] ?? undefined) : undefined,
+    active: u.active,
+    // Only forward-dated locks are real; a past one has already expired and
+    // showing it would report a working account as locked out.
+    lockedUntil:
+      u.lockedUntil && u.lockedUntil > new Date() ? u.lockedUntil.toISOString() : undefined,
+    lastLoginAt: u.lastLoginAt?.toISOString(),
+    isSystemRole: u.role.isSystem,
+    createdAt: u.createdAt.toISOString(),
+  }));
+}
 
 /**
  * Archived clients are returned, not filtered — the same exception

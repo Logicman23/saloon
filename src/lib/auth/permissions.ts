@@ -76,6 +76,7 @@ export const PERMISSIONS = [
   // People
   "staff.view",
   "staff.manage", //         add / edit / remove staff, change roles & passwords
+  "users.manage", //         logins: issue, re-role, suspend, delete
 
   // Commission
   "commissions.view.own",
@@ -100,7 +101,7 @@ const CASHIER_PERMISSIONS: readonly Permission[] = [
   "inventory.view",
   // Explicitly withheld: finance.view, reports.view, expenses.*, invoice.void,
   // pos.discount.override, services.manage, inventory.manage, staff.manage,
-  // clients.export, commissions.*
+  // users.manage, clients.export, commissions.*
 ];
 
 const STAFF_PERMISSIONS: readonly Permission[] = [
@@ -116,6 +117,50 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   CASHIER: CASHIER_PERMISSIONS,
   STAFF: STAFF_PERMISSIONS,
 };
+
+/* ------------------------------------------------- Designation → role */
+
+/**
+ * The access role a chair's designation implies.
+ *
+ * A salon thinks in job titles, not in access tiers, so this is the bridge:
+ * issuing a login for a Nail Technician should not require anyone to work out
+ * that "STAFF" is the right bucket.
+ *
+ * It is a *default*, not a rule. The owner can assign any role explicitly —
+ * a senior stylist who also covers the desk needs CASHIER, and no job title
+ * predicts that. Only the owner's own designation is treated as binding, and
+ * only in one direction: see `isPrivilegedDesignation`.
+ *
+ * Keyed by the `StaffRole` union in lib/types.ts. Stated as a plain literal
+ * rather than importing that module, because this file is pulled into Edge
+ * middleware and must stay dependency-free.
+ */
+export const ROLE_FOR_DESIGNATION: Record<string, Role> = {
+  Owner: "ADMIN",
+  Receptionist: "CASHIER",
+  "Senior Stylist": "STAFF",
+  Stylist: "STAFF",
+  Beautician: "STAFF",
+  "Nail Technician": "STAFF",
+  "Makeup Artist": "STAFF",
+};
+
+/** The role a designation implies, defaulting to the least privileged. */
+export function roleForDesignation(designation: string | undefined): Role {
+  return (designation && ROLE_FOR_DESIGNATION[designation]) || "STAFF";
+}
+
+/**
+ * Whether a designation is one the owner should have to think twice about.
+ *
+ * Used to warn before granting ADMIN to someone whose job title does not imply
+ * it — the difference between a deliberate decision and a mis-click on a
+ * dropdown that hands over the financials.
+ */
+export function isPrivilegedDesignation(designation: string | undefined): boolean {
+  return roleForDesignation(designation) === "ADMIN";
+}
 
 /** Does this role hold the capability? */
 export function roleCan(role: Role, permission: Permission): boolean {
@@ -150,6 +195,7 @@ export const ROUTE_PERMISSIONS: Array<{ prefix: string; anyOf: Permission[] }> =
   { prefix: "/expenses", anyOf: ["expenses.view"] },
   { prefix: "/invoices", anyOf: ["invoice.view"] },
   { prefix: "/reports", anyOf: ["reports.view"] },
+  { prefix: "/staff/users", anyOf: ["users.manage"] },
   { prefix: "/staff", anyOf: ["staff.view"] },
   // The executive dashboard leads with revenue and net profit, so it is
   // gated on the financial capability rather than on merely being signed in.
