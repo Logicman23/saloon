@@ -56,7 +56,15 @@ export interface Service {
   durationMin: number;
   price: number;
   description?: string;
+  /** Bookable now. Switched off is a pause, not a removal. */
   active: boolean;
+  /**
+   * Soft-deleted. Unlike products and packages these are still delivered to
+   * the client, because past appointments and invoice lines resolve their
+   * name and category through the service id — dropping them from the list
+   * would blank out history. Catalogue surfaces filter on this instead.
+   */
+  archived: boolean;
 }
 
 export interface ServicePackage {

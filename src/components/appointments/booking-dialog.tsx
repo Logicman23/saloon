@@ -117,7 +117,9 @@ function BookingForm({
 
   const visibleServices = React.useMemo(
     () =>
-      services.filter((s) => s.active && (category === "all" || s.category === category)),
+      services.filter(
+        (s) => s.active && !s.archived && (category === "all" || s.category === category),
+      ),
     [services, category],
   );
 

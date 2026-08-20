@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { Clock, Layers, Plus, Search, Sparkles, Tag } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { toast } from "sonner";
+import { Clock, Layers, Pencil, Plus, Search, Sparkles, Tag, Trash2 } from "lucide-react";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, SectionHeading } from "@/components/ui/misc";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -21,40 +23,76 @@ import { useSalon } from "@/lib/data/store";
 import { useAuth } from "@/lib/auth/context";
 import { ServiceDialog } from "@/components/services/service-dialog";
 import { PackageDialog } from "@/components/services/package-dialog";
-import { SERVICE_CATEGORIES } from "@/lib/types";
+import { SERVICE_CATEGORIES, type Service, type ServicePackage } from "@/lib/types";
 import { cn, formatDuration, formatMoney } from "@/lib/utils";
 
 export default function ServicesPage() {
-  const { services, packages } = useSalon();
+  const { services, packages, appointments, actions } = useSalon();
   const { can } = useAuth();
+  const canManage = can("services.manage");
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState("all");
   const [serviceOpen, setServiceOpen] = React.useState(false);
   const [packageOpen, setPackageOpen] = React.useState(false);
+  const [editingDeal, setEditingDeal] = React.useState<ServicePackage | null>(null);
+  const [removingDeal, setRemovingDeal] = React.useState<ServicePackage | null>(null);
+  const [editingService, setEditingService] = React.useState<Service | null>(null);
+  const [removingService, setRemovingService] = React.useState<Service | null>(null);
+
+  /**
+   * The two dependencies `archiveServiceAction` refuses on, surfaced before
+   * the click rather than after it.
+   *
+   * The server is still the authority — the store only holds a calendar
+   * window, so a booking further out would be missed here and caught there.
+   * This exists so the common case explains itself instead of failing.
+   */
+  const serviceBlockers = React.useMemo(() => {
+    if (!removingService) return null;
+    const now = new Date().toISOString();
+    return {
+      upcoming: appointments.filter(
+        (a) =>
+          a.serviceIds.includes(removingService.id) &&
+          a.start >= now &&
+          (a.status === "SCHEDULED" || a.status === "IN_PROGRESS"),
+      ).length,
+      deals: packages.filter((p) => p.serviceIds.includes(removingService.id)),
+    };
+  }, [removingService, appointments, packages]);
 
   const q = query.trim().toLowerCase();
 
+  /**
+   * The catalogue, minus anything archived.
+   *
+   * `services` deliberately still carries archived rows — the calendar and the
+   * revenue analytics resolve historical bookings through it — so every view
+   * that presents the *current* catalogue filters them here.
+   */
+  const live = React.useMemo(() => services.filter((s) => !s.archived), [services]);
+
   const filtered = React.useMemo(
     () =>
-      services.filter(
+      live.filter(
         (s) =>
           (category === "all" || s.category === category) &&
           (!q || s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q)),
       ),
-    [services, category, q],
+    [live, category, q],
   );
 
   const byCategory = React.useMemo(
     () =>
       SERVICE_CATEGORIES.map((cat) => {
-        const own = services.filter((s) => s.category === cat);
+        const own = live.filter((s) => s.category === cat);
         return {
           category: cat,
           count: own.length,
           avgPrice: own.length ? own.reduce((sum, s) => sum + s.price, 0) / own.length : 0,
         };
       }),
-    [services],
+    [live],
   );
 
   return (
@@ -75,7 +113,7 @@ export default function ServicesPage() {
             </div>
             {/* Presentation only — createServiceAction re-checks the same
                 capability, since a server action is a callable endpoint. */}
-            {can("services.manage") && (
+            {canManage && (
               <>
                 <Button variant="outline" onClick={() => setPackageOpen(true)}>
                   <Layers />
@@ -92,7 +130,114 @@ export default function ServicesPage() {
       />
 
       <ServiceDialog open={serviceOpen} onOpenChange={setServiceOpen} />
+      <ServiceDialog
+        service={editingService}
+        open={Boolean(editingService)}
+        onOpenChange={(open) => !open && setEditingService(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(removingService)}
+        onOpenChange={(open) => !open && setRemovingService(null)}
+        title="Delete this service?"
+        description={
+          removingService
+            ? `${removingService.name} will come off the booking menu, the POS catalogue and the deal builder.`
+            : undefined
+        }
+        confirmLabel="Delete service"
+        pendingLabel="Deleting…"
+        // Blocked outright when something still depends on it. The modal says
+        // what, so the button being dead is an instruction rather than a bug.
+        confirmDisabled={Boolean(
+          serviceBlockers && (serviceBlockers.upcoming > 0 || serviceBlockers.deals.length > 0),
+        )}
+        onConfirm={async () => {
+          if (!removingService) return;
+          const result = await actions.archiveService(removingService.id);
+          if (!result.ok) return result.error;
+          toast.success(`${result.data.name} removed from the catalogue.`);
+        }}
+      >
+        <p className="text-sm text-muted">
+          Past appointments and invoices keep it — the service is retired, not erased, so the
+          calendar history and the category revenue split still read correctly.
+        </p>
+
+        {serviceBlockers && serviceBlockers.upcoming > 0 && (
+          <p className="rounded-lg border border-danger/25 bg-danger/[0.06] p-3 text-sm text-danger">
+            {serviceBlockers.upcoming === 1
+              ? "1 upcoming booking still includes this service."
+              : `${serviceBlockers.upcoming} upcoming bookings still include this service.`}{" "}
+            Complete or cancel {serviceBlockers.upcoming === 1 ? "it" : "them"} first.
+          </p>
+        )}
+
+        {serviceBlockers && serviceBlockers.deals.length > 0 && (
+          <div className="rounded-lg border border-danger/25 bg-danger/[0.06] p-3">
+            <p className="text-sm text-danger">
+              Bundled into {serviceBlockers.deals.length === 1 ? "a deal" : "deals"} — remove it
+              there first, or the bundle keeps selling a service that is gone:
+            </p>
+            <ul className="mt-1.5 space-y-0.5">
+              {serviceBlockers.deals.map((deal) => (
+                <li key={deal.id} className="text-xs text-muted">
+                  · {deal.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {serviceBlockers &&
+          serviceBlockers.upcoming === 0 &&
+          serviceBlockers.deals.length === 0 &&
+          removingService?.active && (
+            <p className="rounded-lg border border-hairline bg-obsidian-elevated p-3 text-xs text-faint">
+              To take it off the menu temporarily instead, edit the service and switch{" "}
+              <span className="text-muted">Bookable now</span> off — it stays on this page and can
+              be switched back on.
+            </p>
+          )}
+      </ConfirmDialog>
+
       <PackageDialog open={packageOpen} onOpenChange={setPackageOpen} />
+      <PackageDialog
+        deal={editingDeal}
+        open={Boolean(editingDeal)}
+        onOpenChange={(open) => !open && setEditingDeal(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(removingDeal)}
+        onOpenChange={(open) => !open && setRemovingDeal(null)}
+        title="Delete this deal?"
+        description={
+          removingDeal
+            ? `${removingDeal.name} will come off the deals grid and the POS catalogue.`
+            : undefined
+        }
+        confirmLabel="Delete deal"
+        pendingLabel="Deleting…"
+        onConfirm={async () => {
+          if (!removingDeal) return;
+          const result = await actions.archivePackage(removingDeal.id);
+          if (!result.ok) return result.error;
+          toast.success(`${result.data.name} removed from deals.`);
+        }}
+      >
+        <p className="text-sm text-muted">
+          The bundle record is kept, so an invoice already raised against it still shows what
+          was sold. The member services are untouched and stay individually bookable.
+        </p>
+        {removingDeal?.active && (
+          <p className="rounded-lg border border-hairline bg-obsidian-elevated p-3 text-xs text-faint">
+            To pause it for a season instead, edit the deal and switch{" "}
+            <span className="text-muted">Sellable now</span> off — it stays on this page and can
+            be switched back on.
+          </p>
+        )}
+      </ConfirmDialog>
 
       {/* Category summary */}
       <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
@@ -110,7 +255,7 @@ export default function ServicesPage() {
       <Tabs defaultValue="services">
         <TabsList>
           <TabsTrigger value="services">
-            <Sparkles className="size-3.5" /> Services ({services.length})
+            <Sparkles className="size-3.5" /> Services ({live.length})
           </TabsTrigger>
           <TabsTrigger value="packages">
             <Layers className="size-3.5" /> Packages ({packages.length})
@@ -146,11 +291,12 @@ export default function ServicesPage() {
                   <TableHead className="text-right">Price</TableHead>
                   <TableHead className="text-right">Rate / hour</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.length === 0 && (
-                  <TableEmpty colSpan={6}>No service matches “{query}”.</TableEmpty>
+                  <TableEmpty colSpan={7}>No service matches “{query}”.</TableEmpty>
                 )}
                 {filtered.map((service) => (
                   <TableRow key={service.id}>
@@ -181,6 +327,30 @@ export default function ServicesPage() {
                       <Badge variant={service.active ? "success" : "neutral"}>
                         {service.active ? "Active" : "Inactive"}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {canManage && (
+                        <div className="flex items-center justify-end gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingService(service)}
+                          >
+                            <Pencil />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            title={`Delete ${service.name}`}
+                            className="hover:bg-danger/10 hover:text-danger"
+                            onClick={() => setRemovingService(service)}
+                          >
+                            <Trash2 />
+                            <span className="sr-only">Delete {service.name}</span>
+                          </Button>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -213,11 +383,13 @@ export default function ServicesPage() {
                   <CardHeader>
                     <div className="flex items-start justify-between gap-2">
                       <CardTitle className="font-display text-lg">{pkg.name}</CardTitle>
-                      {saving > 0 && (
-                        <Badge variant="success" className="shrink-0">
-                          Save {savingPct.toFixed(0)}%
-                        </Badge>
-                      )}
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {/* Paused deals stay on this page but are off the POS.
+                            Without this the only difference between a paused
+                            deal and a live one is invisible. */}
+                        {!pkg.active && <Badge variant="neutral">Paused</Badge>}
+                        {saving > 0 && <Badge variant="success">Save {savingPct.toFixed(0)}%</Badge>}
+                      </div>
                     </div>
                     {pkg.description && (
                       <p className="text-sm text-muted">{pkg.description}</p>
@@ -261,6 +433,25 @@ export default function ServicesPage() {
                       </div>
                     </div>
                   </CardContent>
+
+                  {canManage && (
+                    <CardFooter className="justify-end gap-1 border-gold/15 px-5 py-3">
+                      <Button variant="ghost" size="sm" onClick={() => setEditingDeal(pkg)}>
+                        <Pencil />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title={`Delete ${pkg.name}`}
+                        className="hover:bg-danger/10 hover:text-danger"
+                        onClick={() => setRemovingDeal(pkg)}
+                      >
+                        <Trash2 />
+                        <span className="sr-only">Delete {pkg.name}</span>
+                      </Button>
+                    </CardFooter>
+                  )}
                 </Card>
               );
             })}

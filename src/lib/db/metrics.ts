@@ -493,8 +493,15 @@ export const getClientSpend = cache(async (): Promise<Map<string, { totalSpend: 
 /* ------------------------------------------------------------- Inventory */
 
 export const getLowStockCount = cache(async (): Promise<number> => {
+  // Archived products are excluded explicitly. This is raw SQL, so it does not
+  // inherit the `archivedAt` filter that `getProducts` applies — and a retired
+  // product sits at zero stock forever, which is permanently "below the
+  // reorder threshold". Without this the alert badge never clears.
   const rows = await prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
-    SELECT COUNT(*) AS count FROM inventory WHERE stock_qty <= min_stock_alert
+    SELECT COUNT(*) AS count
+    FROM inventory
+    WHERE stock_qty <= min_stock_alert
+      AND archived_at IS NULL
   `);
   return num(rows[0]?.count);
 });

@@ -112,6 +112,18 @@ export const getClients = cache(async (): Promise<Client[]> => {
   }));
 });
 
+/**
+ * Archived services are returned, not filtered — the one deliberate exception
+ * to the rule `getProducts` and `getPackages` follow.
+ *
+ * A service id is a live reference: `appointment_services` rows point at it,
+ * and the analytics in `lib/data/analytics.ts` resolve an invoice line's
+ * category by looking its `refId` up in this list. Filtering archived rows out
+ * here would blank the service names on every past booking and quietly drop
+ * that revenue out of the category breakdown. So the flag travels with the
+ * row, and the catalogue surfaces — POS, booking menu, deal builder, this
+ * page's table — exclude it.
+ */
 export const getServices = cache(async (): Promise<Service[]> => {
   const rows = await prisma.service.findMany({ orderBy: [{ category: "asc" }, { name: "asc" }] });
   return rows.map((s) => ({
@@ -122,11 +134,22 @@ export const getServices = cache(async (): Promise<Service[]> => {
     price: toNumber(s.price),
     description: s.description ?? undefined,
     active: s.active,
+    archived: s.archivedAt !== null,
   }));
 });
 
+/**
+ * Archived rows are excluded here rather than at each call site.
+ *
+ * A soft-deleted package must disappear from the POS catalogue, the deals
+ * grid and the command palette alike; filtering once at the read boundary is
+ * what makes that true everywhere by construction, instead of depending on
+ * six components each remembering to check. The row itself stays put so
+ * `package_services` and any invoice line pointing at it survive.
+ */
 export const getPackages = cache(async (): Promise<ServicePackage[]> => {
   const rows = await prisma.servicePackage.findMany({
+    where: { archivedAt: null },
     include: { services: { select: { serviceId: true } } },
     orderBy: { name: "asc" },
   });
@@ -140,8 +163,12 @@ export const getPackages = cache(async (): Promise<ServicePackage[]> => {
   }));
 });
 
+/** Archived products are filtered here — see `getPackages` for why. */
 export const getProducts = cache(async (): Promise<Product[]> => {
-  const rows = await prisma.product.findMany({ orderBy: { name: "asc" } });
+  const rows = await prisma.product.findMany({
+    where: { archivedAt: null },
+    orderBy: { name: "asc" },
+  });
   return rows.map((p) => ({
     id: p.id,
     name: p.name,

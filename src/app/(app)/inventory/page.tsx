@@ -7,7 +7,9 @@ import {
   ArrowDownUp,
   Boxes,
   PackagePlus,
+  Pencil,
   Search,
+  Trash2,
   TrendingDown,
   Wallet,
 } from "lucide-react";
@@ -41,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { useLookups, useSalon } from "@/lib/data/store";
 import { ProtectedRoute, useAuth } from "@/lib/auth/context";
@@ -79,6 +82,8 @@ function InventoryView() {
   const [query, setQuery] = React.useState("");
   const [typeFilter, setTypeFilter] = React.useState("all");
   const [adjusting, setAdjusting] = React.useState<Product | null>(null);
+  const [editing, setEditing] = React.useState<Product | null>(null);
+  const [removing, setRemoving] = React.useState<Product | null>(null);
   const [productOpen, setProductOpen] = React.useState(false);
 
   const q = query.trim().toLowerCase();
@@ -184,6 +189,11 @@ function InventoryView() {
       />
 
       <ProductDialog open={productOpen} onOpenChange={setProductOpen} />
+      <ProductDialog
+        product={editing}
+        open={Boolean(editing)}
+        onOpenChange={(open) => !open && setEditing(null)}
+      />
 
       <Tabs defaultValue="stock">
         <TabsList>
@@ -281,9 +291,30 @@ function InventoryView() {
                       </TableCell>
                       <TableCell className="text-right">
                         {canManage && (
-                          <Button variant="ghost" size="sm" onClick={() => setAdjusting(product)}>
-                            Adjust
-                          </Button>
+                          <div className="flex items-center justify-end gap-0.5">
+                            <Button variant="ghost" size="sm" onClick={() => setAdjusting(product)}>
+                              Adjust
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              title={`Edit ${product.name}`}
+                              onClick={() => setEditing(product)}
+                            >
+                              <Pencil />
+                              <span className="sr-only">Edit {product.name}</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              title={`Delete ${product.name}`}
+                              className="hover:bg-danger/10 hover:text-danger"
+                              onClick={() => setRemoving(product)}
+                            >
+                              <Trash2 />
+                              <span className="sr-only">Delete {product.name}</span>
+                            </Button>
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
@@ -355,6 +386,54 @@ function InventoryView() {
         staff={staff}
         onSubmit={actions.adjustStock}
       />
+
+      <ConfirmDialog
+        open={Boolean(removing)}
+        onOpenChange={(open) => !open && setRemoving(null)}
+        title="Delete this product?"
+        description={
+          removing
+            ? `${removing.name} will be taken off the inventory list, the POS catalogue and the low-stock alerts.`
+            : undefined
+        }
+        confirmLabel="Delete product"
+        pendingLabel="Deleting…"
+        onConfirm={async () => {
+          if (!removing) return;
+          const result = await actions.archiveProduct(removing.id);
+          // Returning the message keeps the dialog open with the reason on it,
+          // rather than closing over a write that never happened.
+          if (!result.ok) return result.error;
+          toast.success(`${result.data.name} removed from the catalogue.`);
+        }}
+      >
+        {removing && (
+          <>
+            <p className="text-sm text-muted">
+              Its movement history and any past invoice line stay intact — the product is
+              retired, not erased, so last month&apos;s figures still add up.
+            </p>
+            {removing.stock > 0 && (
+              <div className="flex items-center justify-between rounded-lg border border-warning/25 bg-warning/[0.06] p-3">
+                <span className="text-sm text-muted">
+                  Still on hand
+                  <span className="mt-0.5 block text-xs text-faint">
+                    leaves the stock valuation
+                  </span>
+                </span>
+                <span className="text-right">
+                  <span className="tabular block font-semibold text-warning">
+                    {removing.stock} {removing.unit}
+                  </span>
+                  <span className="tabular block text-xs text-faint">
+                    {formatMoney(removing.stock * removing.costPrice)}
+                  </span>
+                </span>
+              </div>
+            )}
+          </>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Loader2, TrendingDown } from "lucide-react";
+import { ArrowDownUp, Loader2, TrendingDown } from "lucide-react";
 import {
   Dialog,
   DialogBody,
@@ -23,43 +23,62 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSalon } from "@/lib/data/store";
-import type { ProductType } from "@/lib/types";
+import type { Product, ProductType } from "@/lib/types";
 import { formatMoney } from "@/lib/utils";
 
 /** Units a salon actually buys in — free text would fragment the stock report. */
 const UNITS = ["pc", "ml", "ltr", "g", "kg", "box", "pack"] as const;
 
+/**
+ * Create and edit are the same form.
+ *
+ * The fields, the validation and the margin maths are identical; only the id
+ * differs, and splitting them into two components would mean every future
+ * change to a product field has to be made twice — which is how the two
+ * versions drift apart.
+ */
 export function ProductDialog({
   open,
   onOpenChange,
+  product,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Omit to add a new product; pass one to edit it in place. */
+  product?: Product | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Radix unmounts Content on close, so the form is freshly seeded on
-          every open and needs no reset effect. */}
+          every open and needs no reset effect. The key covers the other route
+          in — switching straight from editing one row to another. */}
       <DialogContent size="lg" className="max-h-[90vh]">
-        <ProductForm onDone={() => onOpenChange(false)} />
+        <ProductForm
+          key={product?.id ?? "new"}
+          product={product ?? null}
+          onDone={() => onOpenChange(false)}
+        />
       </DialogContent>
     </Dialog>
   );
 }
 
-function ProductForm({ onDone }: { onDone: () => void }) {
+function ProductForm({ product, onDone }: { product: Product | null; onDone: () => void }) {
   const { actions } = useSalon();
+  const editing = Boolean(product);
 
-  const [name, setName] = React.useState("");
-  const [sku, setSku] = React.useState("");
-  const [type, setType] = React.useState<ProductType>("RETAIL");
-  const [brand, setBrand] = React.useState("");
-  const [unit, setUnit] = React.useState<string>("pc");
-  const [costPrice, setCostPrice] = React.useState("");
-  const [retailPrice, setRetailPrice] = React.useState("");
-  const [stock, setStock] = React.useState("0");
-  const [lowStockThreshold, setLowStockThreshold] = React.useState("5");
-  const [supplier, setSupplier] = React.useState("");
+  const [name, setName] = React.useState(product?.name ?? "");
+  const [sku, setSku] = React.useState(product?.sku ?? "");
+  const [type, setType] = React.useState<ProductType>(product?.type ?? "RETAIL");
+  const [brand, setBrand] = React.useState(product?.brand ?? "");
+  const [unit, setUnit] = React.useState<string>(product?.unit ?? "pc");
+  const [costPrice, setCostPrice] = React.useState(product ? String(product.costPrice) : "");
+  const [retailPrice, setRetailPrice] = React.useState(product ? String(product.retailPrice) : "");
+  const [stock, setStock] = React.useState(String(product?.stock ?? 0));
+  const [lowStockThreshold, setLowStockThreshold] = React.useState(
+    String(product?.lowStockThreshold ?? 5),
+  );
+  const [supplier, setSupplier] = React.useState(product?.supplier ?? "");
   const [error, setError] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
@@ -68,6 +87,12 @@ function ProductForm({ onDone }: { onDone: () => void }) {
   const marginReady = costPrice !== "" && retailPrice !== "" && cost > 0 && retail > 0;
   const margin = marginReady ? ((retail - cost) / retail) * 100 : 0;
   const sellingBelowCost = marginReady && retail < cost;
+
+  // Editing the on-hand figure writes a movement rather than overwriting the
+  // column, so the person doing it should see the correction they are about
+  // to file before they file it.
+  const nextStock = Number(stock) || 0;
+  const stockDelta = product ? nextStock - product.stock : 0;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -86,7 +111,7 @@ function ProductForm({ onDone }: { onDone: () => void }) {
     setError("");
     setSaving(true);
     try {
-      const result = await actions.addProduct({
+      const payload = {
         name: name.trim(),
         sku: sku.trim().toUpperCase(),
         type,
@@ -94,10 +119,14 @@ function ProductForm({ onDone }: { onDone: () => void }) {
         unit,
         costPrice: cost,
         retailPrice: retail,
-        stock: Number(stock) || 0,
+        stock: nextStock,
         lowStockThreshold: Number(lowStockThreshold) || 0,
         supplier: supplier.trim() || undefined,
-      });
+      };
+
+      const result = product
+        ? await actions.updateProduct(product.id, payload)
+        : await actions.addProduct(payload);
 
       // The action's own message, not a generic apology — it names the field,
       // the clashing SKU or the unreachable database.
@@ -106,7 +135,9 @@ function ProductForm({ onDone }: { onDone: () => void }) {
         return;
       }
 
-      toast.success(`${result.data.name} added to inventory.`);
+      toast.success(
+        editing ? `${result.data.name} updated.` : `${result.data.name} added to inventory.`,
+      );
       onDone();
     } finally {
       // In a finally block so a thrown action cannot strand the button in its
@@ -120,10 +151,11 @@ function ProductForm({ onDone }: { onDone: () => void }) {
     // footer is clipped as soon as the margin panel appears.
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
       <DialogHeader>
-        <DialogTitle>New product</DialogTitle>
+        <DialogTitle>{editing ? "Edit product" : "New product"}</DialogTitle>
         <DialogDescription>
-          Add retail shelf stock or a back-bar consumable. Opening stock is recorded as a
-          movement so the ledger reconciles.
+          {editing
+            ? "Price and detail changes apply from now on — invoices already raised keep the figures they were billed at."
+            : "Add retail shelf stock or a back-bar consumable. Opening stock is recorded as a movement so the ledger reconciles."}
         </DialogDescription>
       </DialogHeader>
 
@@ -223,7 +255,7 @@ function ProductForm({ onDone }: { onDone: () => void }) {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="product-stock">Opening stock</Label>
+            <Label htmlFor="product-stock">{editing ? "Stock on hand" : "Opening stock"}</Label>
             <Input
               id="product-stock"
               type="number"
@@ -262,6 +294,27 @@ function ProductForm({ onDone }: { onDone: () => void }) {
             />
           </div>
         </div>
+
+        {/* A corrected count is a stock movement like any other. Showing the
+            entry that is about to be written keeps the edit form and the
+            Adjust dialog telling the same story. */}
+        {editing && stockDelta !== 0 && (
+          <div className="flex items-center justify-between rounded-lg border border-hairline bg-obsidian-elevated p-3">
+            <span className="flex items-center gap-2 text-sm text-muted">
+              <ArrowDownUp className="size-4 text-gold/70" />
+              Files a stock correction
+            </span>
+            <span className="text-right">
+              <span className="tabular block font-semibold text-gold">
+                {stockDelta > 0 ? "+" : ""}
+                {stockDelta} {unit}
+              </span>
+              <span className="tabular block text-xs text-faint">
+                {product?.stock} → {nextStock}
+              </span>
+            </span>
+          </div>
+        )}
 
         {/* Live margin. Priced-below-cost is legitimate for clearance, so this
             warns rather than blocks — but a transposed cost/retail pair is the
@@ -305,7 +358,7 @@ function ProductForm({ onDone }: { onDone: () => void }) {
         </Button>
         <Button type="submit" disabled={saving}>
           {saving && <Loader2 className="animate-spin" />}
-          {saving ? "Saving…" : "Add product"}
+          {saving ? "Saving…" : editing ? "Save changes" : "Add product"}
         </Button>
       </DialogFooter>
     </form>

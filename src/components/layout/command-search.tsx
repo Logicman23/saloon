@@ -106,6 +106,9 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
       }
 
       for (const service of searchServices ? services : []) {
+        // Archived services are still in the list for historical lookups, but
+        // jumping to one from search would land on a row that is not there.
+        if (service.archived) continue;
         if (service.name.toLowerCase().includes(q) || service.category.toLowerCase().includes(q)) {
           collected.push({
             id: `svc:${service.id}`,

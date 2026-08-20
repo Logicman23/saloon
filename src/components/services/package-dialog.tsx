@@ -17,33 +17,44 @@ import { Input, Textarea } from "@/components/ui/input";
 import { Label, Switch } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
 import { useSalon } from "@/lib/data/store";
-import { SERVICE_CATEGORIES } from "@/lib/types";
+import { SERVICE_CATEGORIES, type ServicePackage } from "@/lib/types";
 import { cn, formatDuration, formatMoney } from "@/lib/utils";
 
+/**
+ * Create and edit share one form — see `product-dialog` for the reasoning.
+ */
 export function PackageDialog({
   open,
   onOpenChange,
+  deal,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Omit to build a new deal; pass one to edit it in place. */
+  deal?: ServicePackage | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="xl" className="max-h-[90vh]">
-        <PackageForm onDone={() => onOpenChange(false)} />
+        <PackageForm
+          key={deal?.id ?? "new"}
+          deal={deal ?? null}
+          onDone={() => onOpenChange(false)}
+        />
       </DialogContent>
     </Dialog>
   );
 }
 
-function PackageForm({ onDone }: { onDone: () => void }) {
+function PackageForm({ deal, onDone }: { deal: ServicePackage | null; onDone: () => void }) {
   const { actions, services } = useSalon();
+  const editing = Boolean(deal);
 
-  const [name, setName] = React.useState("");
-  const [description, setDescription] = React.useState("");
-  const [price, setPrice] = React.useState("");
-  const [serviceIds, setServiceIds] = React.useState<string[]>([]);
-  const [active, setActive] = React.useState(true);
+  const [name, setName] = React.useState(deal?.name ?? "");
+  const [description, setDescription] = React.useState(deal?.description ?? "");
+  const [price, setPrice] = React.useState(deal ? String(deal.price) : "");
+  const [serviceIds, setServiceIds] = React.useState<string[]>(deal?.serviceIds ?? []);
+  const [active, setActive] = React.useState(deal?.active ?? true);
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState("all");
   const [error, setError] = React.useState("");
@@ -65,6 +76,7 @@ function PackageForm({ onDone }: { onDone: () => void }) {
     return services.filter(
       (s) =>
         s.active &&
+        !s.archived &&
         (category === "all" || s.category === category) &&
         (!q || s.name.toLowerCase().includes(q)),
     );
@@ -86,20 +98,24 @@ function PackageForm({ onDone }: { onDone: () => void }) {
     setError("");
     setSaving(true);
     try {
-      const result = await actions.addPackage({
+      const payload = {
         name: name.trim(),
         description: description.trim() || undefined,
         price: bundlePrice,
         serviceIds,
         active,
-      });
+      };
+
+      const result = deal
+        ? await actions.updatePackage(deal.id, payload)
+        : await actions.addPackage(payload);
 
       if (!result.ok) {
         setError(result.error);
         return;
       }
 
-      toast.success(`${result.data.name} added to deals.`);
+      toast.success(editing ? `${result.data.name} updated.` : `${result.data.name} added to deals.`);
       onDone();
     } finally {
       setSaving(false);
@@ -111,10 +127,11 @@ function PackageForm({ onDone }: { onDone: () => void }) {
     // footer is clipped as soon as the summary panel appears.
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
       <DialogHeader>
-        <DialogTitle>New deal</DialogTitle>
+        <DialogTitle>{editing ? "Edit deal" : "New deal"}</DialogTitle>
         <DialogDescription>
-          Bundle two or more services at a combined price. Members stay individually
-          bookable.
+          {editing
+            ? "Repricing or rebundling applies from now on — invoices already raised keep the price they were billed at."
+            : "Bundle two or more services at a combined price. Members stay individually bookable."}
         </DialogDescription>
       </DialogHeader>
 
@@ -315,7 +332,7 @@ function PackageForm({ onDone }: { onDone: () => void }) {
         </Button>
         <Button type="submit" disabled={saving}>
           {saving && <Loader2 className="animate-spin" />}
-          {saving ? "Saving…" : "Add deal"}
+          {saving ? "Saving…" : editing ? "Save changes" : "Add deal"}
           {serviceIds.length > 0 && !saving && (
             <Badge variant="neutral" className="ml-1 border-black/20 bg-black/15 text-obsidian">
               {serviceIds.length}

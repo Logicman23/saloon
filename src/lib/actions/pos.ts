@@ -61,9 +61,12 @@ export async function checkoutAction(input: CheckoutInput): Promise<ActionResult
     const packageIds = parsed.lines.filter((l) => l.kind === "PACKAGE").map((l) => l.refId);
 
     const [services, products, packages, staff] = await Promise.all([
-      prisma.service.findMany({ where: { id: { in: serviceIds } } }),
-      prisma.product.findMany({ where: { id: { in: productIds } } }),
-      prisma.servicePackage.findMany({ where: { id: { in: packageIds } } }),
+      prisma.service.findMany({ where: { id: { in: serviceIds }, archivedAt: null } }),
+      // `archivedAt` is part of the lookup, not just the catalogue screen: a
+      // POS tab left open before the item was removed would otherwise still
+      // ring it up, and the line would land on a real invoice.
+      prisma.product.findMany({ where: { id: { in: productIds }, archivedAt: null } }),
+      prisma.servicePackage.findMany({ where: { id: { in: packageIds }, archivedAt: null } }),
       prisma.staff.findMany({ select: { id: true, commissionRate: true } }),
     ]);
 

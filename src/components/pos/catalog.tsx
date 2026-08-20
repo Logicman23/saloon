@@ -33,6 +33,9 @@ export function Catalog({ onPick }: { onPick: (pick: CatalogPick) => void }) {
       services.filter(
         (s) =>
           s.active &&
+          // Archived services stay in the store so past bookings can still
+          // resolve their names; they must not be sellable.
+          !s.archived &&
           (category === "all" || s.category === category) &&
           (!q || s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q)),
       ),

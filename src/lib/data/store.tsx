@@ -16,9 +16,15 @@ import {
   createStaffAction,
 } from "@/lib/actions/salon";
 import {
+  archivePackageAction,
+  archiveProductAction,
+  archiveServiceAction,
   createPackageAction,
   createProductAction,
   createServiceAction,
+  updatePackageAction,
+  updateProductAction,
+  updateServiceAction,
 } from "@/lib/actions/catalog";
 import { checkoutAction } from "@/lib/actions/pos";
 import type {
@@ -56,6 +62,40 @@ import type {
  * file — even for a type.
  */
 export type SaveResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
+/**
+ * Create and edit send the same payload, so the forms take one shape and the
+ * id is what decides which action runs.
+ */
+export interface ProductInput {
+  name: string;
+  sku: string;
+  type: Product["type"];
+  brand: string;
+  unit: string;
+  costPrice: number;
+  retailPrice: number;
+  stock: number;
+  lowStockThreshold: number;
+  supplier?: string;
+}
+
+export interface ServiceInput {
+  name: string;
+  category: ServiceCategory;
+  durationMin: number;
+  price: number;
+  description?: string;
+  active: boolean;
+}
+
+export interface PackageInput {
+  name: string;
+  description?: string;
+  price: number;
+  serviceIds: string[];
+  active: boolean;
+}
 
 export interface SalonData {
   staff: Staff[];
@@ -121,35 +161,23 @@ interface SalonActions {
     note?: string;
   }) => Promise<void>;
 
-  addProduct: (input: {
-    name: string;
-    sku: string;
-    type: Product["type"];
-    brand: string;
-    unit: string;
-    costPrice: number;
-    retailPrice: number;
-    stock: number;
-    lowStockThreshold: number;
-    supplier?: string;
-  }) => Promise<SaveResult<Product>>;
+  addProduct: (input: ProductInput) => Promise<SaveResult<Product>>;
+  updateProduct: (id: string, input: ProductInput) => Promise<SaveResult<Product>>;
+  /**
+   * Named for what it does. The button says "Delete", but the row is retired
+   * rather than dropped — deleting it would cascade the stock ledger away.
+   */
+  archiveProduct: (id: string) => Promise<SaveResult<{ name: string }>>;
 
-  addService: (input: {
-    name: string;
-    category: ServiceCategory;
-    durationMin: number;
-    price: number;
-    description?: string;
-    active: boolean;
-  }) => Promise<SaveResult<Service>>;
+  addService: (input: ServiceInput) => Promise<SaveResult<Service>>;
+  updateService: (id: string, input: ServiceInput) => Promise<SaveResult<Service>>;
+  /** Soft delete — see `archiveProduct`. Refused if bookings or deals need it. */
+  archiveService: (id: string) => Promise<SaveResult<{ name: string }>>;
 
-  addPackage: (input: {
-    name: string;
-    description?: string;
-    price: number;
-    serviceIds: string[];
-    active: boolean;
-  }) => Promise<SaveResult<ServicePackage>>;
+  addPackage: (input: PackageInput) => Promise<SaveResult<ServicePackage>>;
+  updatePackage: (id: string, input: PackageInput) => Promise<SaveResult<ServicePackage>>;
+  /** Soft delete — see `archiveProduct`. */
+  archivePackage: (id: string) => Promise<SaveResult<{ name: string }>>;
 
   addStaff: (input: {
     name: string;
@@ -368,8 +396,17 @@ export function SalonProvider({
       },
 
       addProduct: async (input) => finish(await createProductAction(input)),
+      updateProduct: async (id, input) => finish(await updateProductAction(id, input)),
+      archiveProduct: async (id) => finish(await archiveProductAction(id)),
+
       addService: async (input) => finish(await createServiceAction(input)),
+      updateService: async (id, input) => finish(await updateServiceAction(id, input)),
+      archiveService: async (id) => finish(await archiveServiceAction(id)),
+
       addPackage: async (input) => finish(await createPackageAction(input)),
+      updatePackage: async (id, input) => finish(await updatePackageAction(id, input)),
+      archivePackage: async (id) => finish(await archivePackageAction(id)),
+
       addStaff: async (input) => finish(await createStaffAction(input)),
     }),
     [refresh, finish, lastError],

@@ -23,38 +23,49 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSalon } from "@/lib/data/store";
-import { SERVICE_CATEGORIES, type ServiceCategory } from "@/lib/types";
+import { SERVICE_CATEGORIES, type Service, type ServiceCategory } from "@/lib/types";
 import { cn, formatDuration, formatMoney } from "@/lib/utils";
 
 /** Chair times a salon actually books in. Free minutes are still allowed via
  *  the input; these just make the common cases one tap. */
 const DURATION_PRESETS = [15, 30, 45, 60, 90, 120, 180] as const;
 
+/**
+ * Create and edit share one form — see `product-dialog` for the reasoning.
+ */
 export function ServiceDialog({
   open,
   onOpenChange,
+  service,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Omit to add a new service; pass one to edit it in place. */
+  service?: Service | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="lg" className="max-h-[90vh]">
-        <ServiceForm onDone={() => onOpenChange(false)} />
+        <ServiceForm
+          key={service?.id ?? "new"}
+          service={service ?? null}
+          onDone={() => onOpenChange(false)}
+        />
       </DialogContent>
     </Dialog>
   );
 }
 
-function ServiceForm({ onDone }: { onDone: () => void }) {
+function ServiceForm({ service, onDone }: { service: Service | null; onDone: () => void }) {
   const { actions, services } = useSalon();
+  const editing = Boolean(service);
 
-  const [name, setName] = React.useState("");
-  const [category, setCategory] = React.useState<ServiceCategory>("Hair");
-  const [durationMin, setDurationMin] = React.useState("45");
-  const [price, setPrice] = React.useState("");
-  const [description, setDescription] = React.useState("");
-  const [active, setActive] = React.useState(true);
+  const [name, setName] = React.useState(service?.name ?? "");
+  const [category, setCategory] = React.useState<ServiceCategory>(service?.category ?? "Hair");
+  const [durationMin, setDurationMin] = React.useState(String(service?.durationMin ?? 45));
+  const [price, setPrice] = React.useState(service ? String(service.price) : "");
+  const [description, setDescription] = React.useState(service?.description ?? "");
+  const [active, setActive] = React.useState(service?.active ?? true);
   const [error, setError] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
@@ -62,16 +73,19 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
   const priceValue = Number(price);
 
   // Warn about the clash the server will reject, while the fix is still one
-  // keystroke away rather than a failed submit.
+  // keystroke away rather than a failed submit. Itself and archived entries
+  // are excluded, matching the rule the action applies.
   const duplicate = React.useMemo(
     () =>
       services.find(
         (s) =>
+          s.id !== service?.id &&
+          !s.archived &&
           s.category === category &&
           s.name.trim().toLowerCase() === name.trim().toLowerCase() &&
           name.trim().length > 0,
       ),
-    [services, category, name],
+    [services, service?.id, category, name],
   );
 
   const submit = async (event: React.FormEvent) => {
@@ -89,14 +103,18 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
     setError("");
     setSaving(true);
     try {
-      const result = await actions.addService({
+      const payload = {
         name: name.trim(),
         category,
         durationMin: duration,
         price: priceValue,
         description: description.trim() || undefined,
         active,
-      });
+      };
+
+      const result = service
+        ? await actions.updateService(service.id, payload)
+        : await actions.addService(payload);
 
       // The action's own message, not a generic apology — it names the field,
       // the clash or the unreachable database.
@@ -105,7 +123,9 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
         return;
       }
 
-      toast.success(`${result.data.name} added to the catalogue.`);
+      toast.success(
+        editing ? `${result.data.name} updated.` : `${result.data.name} added to the catalogue.`,
+      );
       onDone();
     } finally {
       setSaving(false);
@@ -120,9 +140,11 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
     // grows — which is exactly when a price is typed and the summary appears.
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
       <DialogHeader>
-        <DialogTitle>New service</DialogTitle>
+        <DialogTitle>{editing ? "Edit service" : "New service"}</DialogTitle>
         <DialogDescription>
-          Added to the booking calendar and the POS catalogue immediately.
+          {editing
+            ? "Applies from now on. Invoices already raised keep the price they were billed at, and booked appointments keep the chair time they were scheduled with."
+            : "Added to the booking calendar and the POS catalogue immediately."}
         </DialogDescription>
       </DialogHeader>
 
@@ -268,7 +290,7 @@ function ServiceForm({ onDone }: { onDone: () => void }) {
             the control the person just pressed. */}
         <Button type="submit" disabled={saving}>
           {saving && <Loader2 className="animate-spin" />}
-          {saving ? "Saving…" : "Add service"}
+          {saving ? "Saving…" : editing ? "Save changes" : "Add service"}
         </Button>
       </DialogFooter>
     </form>
