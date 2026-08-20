@@ -23,8 +23,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSalon } from "@/lib/data/store";
-import { SERVICE_CATEGORIES, type ServiceCategory, type StaffRole } from "@/lib/types";
+import { SERVICE_CATEGORIES, type ServiceCategory, type Staff, type StaffRole } from "@/lib/types";
 import { cn, formatMoney } from "@/lib/utils";
+
+/**
+ * Commission round-trips through a fraction — 12.5% is stored as 0.125 — and
+ * the multiplication back out lands on 12.500000000000002 often enough to be
+ * worth clamping. Decimal(4,3) gives one decimal place of a percentage.
+ */
+const round1 = (value: number) => Math.round(value * 1000) / 10;
 
 const STAFF_ROLES: readonly StaffRole[] = [
   "Owner",
@@ -40,34 +47,49 @@ const STAFF_ROLES: readonly StaffRole[] = [
 const NON_SERVICE_ROLES: readonly StaffRole[] = ["Receptionist"];
 
 export function StaffDialog({
+  member = null,
   open,
   onOpenChange,
 }: {
+  /** Omitted to add a new member; supplied to edit that one. */
+  member?: Staff | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      {/*
+        Keyed on the member so the form remounts when a different card is
+        opened. Without it React reuses the instance and its state, and the
+        second person edited would open holding the first one's details.
+      */}
       <DialogContent size="lg" className="max-h-[90vh]">
-        <StaffForm onDone={() => onOpenChange(false)} />
+        <StaffForm key={member?.id ?? "new"} member={member} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function StaffForm({ onDone }: { onDone: () => void }) {
+function StaffForm({ member, onDone }: { member: Staff | null; onDone: () => void }) {
   const { actions } = useSalon();
+  const editing = member !== null;
 
-  const [name, setName] = React.useState("");
-  const [role, setRole] = React.useState<StaffRole>("Stylist");
-  const [phone, setPhone] = React.useState("");
-  const [email, setEmail] = React.useState("");
+  const [name, setName] = React.useState(member?.name ?? "");
+  const [role, setRole] = React.useState<StaffRole>(member?.role ?? "Stylist");
+  const [phone, setPhone] = React.useState(member?.phone ?? "");
+  const [email, setEmail] = React.useState(member?.email ?? "");
   // Entered as a percentage because that is how commission is discussed;
   // converted to the fraction the schema stores on submit.
-  const [commissionPct, setCommissionPct] = React.useState("12");
-  const [specialties, setSpecialties] = React.useState<ServiceCategory[]>([]);
-  const [monthlySalary, setMonthlySalary] = React.useState("");
-  const [active, setActive] = React.useState(true);
+  const [commissionPct, setCommissionPct] = React.useState(
+    member ? String(round1(member.commissionRate)) : "12",
+  );
+  const [specialties, setSpecialties] = React.useState<ServiceCategory[]>(
+    member?.specialties ?? [],
+  );
+  const [monthlySalary, setMonthlySalary] = React.useState(
+    member && member.monthlySalary > 0 ? String(member.monthlySalary) : "",
+  );
+  const [active, setActive] = React.useState(member?.active ?? true);
   const [error, setError] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
@@ -99,7 +121,7 @@ function StaffForm({ onDone }: { onDone: () => void }) {
     setError("");
     setSaving(true);
     try {
-      const result = await actions.addStaff({
+      const payload = {
         name: name.trim(),
         role,
         phone: phone.trim(),
@@ -108,14 +130,20 @@ function StaffForm({ onDone }: { onDone: () => void }) {
         specialties: takesChair ? specialties : [],
         monthlySalary: monthlySalary === "" ? 0 : salary,
         active,
-      });
+      };
+
+      const result = member
+        ? await actions.updateStaff(member.id, payload)
+        : await actions.addStaff(payload);
 
       if (!result.ok) {
         setError(result.error);
         return;
       }
 
-      toast.success(`${name.trim()} added to the team.`);
+      toast.success(
+        member ? `${name.trim()} updated.` : `${name.trim()} added to the team.`,
+      );
       onDone();
     } finally {
       setSaving(false);
@@ -127,9 +155,11 @@ function StaffForm({ onDone }: { onDone: () => void }) {
     // footer is clipped as soon as the commission preview appears.
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
       <DialogHeader>
-        <DialogTitle>New team member</DialogTitle>
+        <DialogTitle>{editing ? `Edit ${member.name}` : "New team member"}</DialogTitle>
         <DialogDescription>
-          Creates the chair they are booked against. A login is issued separately.
+          {editing
+            ? "Changes apply from now on — past bookings and commission already earned are unaffected."
+            : "Creates the chair they are booked against. A login is issued separately."}
         </DialogDescription>
       </DialogHeader>
 
@@ -284,7 +314,7 @@ function StaffForm({ onDone }: { onDone: () => void }) {
         </Button>
         <Button type="submit" disabled={saving}>
           {saving && <Loader2 className="animate-spin" />}
-          {saving ? "Saving…" : "Add member"}
+          {saving ? "Saving…" : editing ? "Save changes" : "Add member"}
         </Button>
       </DialogFooter>
     </form>

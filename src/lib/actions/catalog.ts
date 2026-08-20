@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/client";
 import { SERVICE_CATEGORY_TO_DB } from "@/lib/db/queries";
 import {
+  diff,
   failure,
   recordAudit,
   requirePermission,
@@ -137,20 +138,6 @@ export async function createProductAction(
   } catch (error) {
     return failure(error);
   }
-}
-
-/**
- * Field-level diff for the audit metadata.
- *
- * "Someone edited this product" is not an audit trail. What the owner needs
- * six weeks later is the pair of numbers — 1800 became 2400, and who did it.
- */
-function diff<T extends Record<string, unknown>>(before: T, after: T) {
-  const changes: Record<string, { from: unknown; to: unknown }> = {};
-  for (const key of Object.keys(after)) {
-    if (before[key] !== after[key]) changes[key] = { from: before[key], to: after[key] };
-  }
-  return changes;
 }
 
 export async function updateProductAction(

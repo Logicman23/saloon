@@ -1,8 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { CalendarCheck, Percent, Phone, Scissors, UserPlus, Users, Wallet } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  CalendarCheck,
+  Pencil,
+  Percent,
+  Phone,
+  Scissors,
+  UserPlus,
+  Users,
+  Wallet,
+} from "lucide-react";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, SectionHeading } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
@@ -13,6 +22,7 @@ import { ProtectedRoute, useAuth } from "@/lib/auth/context";
 import { periodRange, staffPerformance, summarize } from "@/lib/data/analytics";
 import { formatDate } from "@/lib/date";
 import { formatMoney, formatMoneyCompact } from "@/lib/utils";
+import type { Staff } from "@/lib/types";
 
 export default function StaffPage() {
   return (
@@ -25,7 +35,9 @@ export default function StaffPage() {
 function StaffView() {
   const { staff, invoices, appointments, expenses } = useSalon();
   const { can } = useAuth();
+  const canManage = can("staff.manage");
   const [staffOpen, setStaffOpen] = React.useState(false);
+  const [editingMember, setEditingMember] = React.useState<Staff | null>(null);
 
   const now = React.useMemo(() => new Date(), []);
   const range = React.useMemo(() => periodRange("month", now), [now]);
@@ -83,7 +95,7 @@ function StaffView() {
         description={`Performance for ${range.label.toLowerCase()} — ${formatDate(range.from)} onward.`}
         actions={
           /* Presentation only — createStaffAction re-checks staff.manage. */
-          can("staff.manage") ? (
+          canManage ? (
             <Button onClick={() => setStaffOpen(true)}>
               <UserPlus />
               New member
@@ -93,6 +105,11 @@ function StaffView() {
       />
 
       <StaffDialog open={staffOpen} onOpenChange={setStaffOpen} />
+      <StaffDialog
+        member={editingMember}
+        open={Boolean(editingMember)}
+        onOpenChange={(open) => !open && setEditingMember(null)}
+      />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {staff.map((member) => {
@@ -166,6 +183,15 @@ function StaffView() {
                   <Row label="Joined" value={formatDate(member.joinedAt)} />
                 </div>
               </CardContent>
+
+              {canManage && (
+                <CardFooter className="justify-end px-5 py-3">
+                  <Button variant="ghost" size="sm" onClick={() => setEditingMember(member)}>
+                    <Pencil />
+                    Edit
+                  </Button>
+                </CardFooter>
+              )}
             </Card>
           );
         })}

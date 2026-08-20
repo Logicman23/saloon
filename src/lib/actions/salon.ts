@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/queries";
 import { roleCan } from "@/lib/auth/permissions";
 import {
+  diff,
   failure,
   recordAudit,
   requirePermission,
@@ -407,6 +408,96 @@ export async function createStaffAction(
 
     revalidatePath("/staff");
     revalidatePath("/appointments");
+    return { ok: true, data: member };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function updateStaffAction(
+  staffId: string,
+  input: z.infer<typeof StaffSchema>,
+): Promise<ActionResult<{ id: string; name: string }>> {
+  try {
+    const session = await requirePermission("staff.manage");
+    const data = StaffSchema.parse(input);
+
+    const dbRole = STAFF_ROLE_TO_DB[data.role];
+    if (!dbRole) return { ok: false, error: "Unknown staff role." };
+
+    const existing = await prisma.staff.findUnique({ where: { id: staffId } });
+    if (!existing) {
+      return { ok: false, error: "That team member no longer exists." };
+    }
+
+    // Same rule as create, minus themselves — otherwise saving a member's own
+    // unchanged email would report them as clashing with themselves.
+    if (data.email) {
+      const clash = await prisma.staff.findFirst({
+        where: { id: { not: staffId }, email: data.email },
+        select: { name: true },
+      });
+      if (clash) {
+        return { ok: false, error: `${clash.name} already uses that email address.` };
+      }
+    }
+
+    const specialties = data.specialties.map((c) => SERVICE_CATEGORY_TO_DB[c]);
+
+    const changes = diff(
+      {
+        name: existing.name,
+        role: existing.role,
+        phone: existing.phone,
+        email: existing.email ?? undefined,
+        commissionRate: Number(existing.commissionRate),
+        monthlySalary: Number(existing.monthlySalary),
+        active: existing.active,
+        // Compared as a sorted string for the same reason a package's contents
+        // are: the column is a set, and reordering it is not an edit.
+        specialties: [...existing.specialties].sort().join(","),
+      },
+      {
+        name: data.name,
+        role: dbRole,
+        phone: data.phone,
+        email: data.email || undefined,
+        commissionRate: data.commissionRate,
+        monthlySalary: data.monthlySalary,
+        active: data.active,
+        specialties: [...specialties].sort().join(","),
+      },
+    );
+
+    const member = await prisma.staff.update({
+      where: { id: staffId },
+      data: {
+        name: data.name,
+        role: dbRole as never,
+        phone: data.phone,
+        email: data.email || null,
+        commissionRate: data.commissionRate,
+        specialties: specialties as never,
+        monthlySalary: data.monthlySalary,
+        active: data.active,
+      },
+      select: { id: true, name: true },
+    });
+
+    // Repricing commission does not rewrite history: `invoice_lines` snapshot
+    // the rate they were sold at, and the payroll report sums those snapshots.
+    // A new rate applies to what is sold next.
+    if (Object.keys(changes).length > 0) {
+      await recordAudit("ROLE_CHANGED", session, {
+        entityType: "Staff",
+        entityId: staffId,
+        metadata: { name: data.name, role: data.role, changes },
+      });
+    }
+
+    revalidatePath("/staff");
+    revalidatePath("/appointments");
+    revalidatePath("/my-commissions");
     return { ok: true, data: member };
   } catch (error) {
     return failure(error);

@@ -22,6 +22,8 @@ export interface Staff {
   name: string;
   role: StaffRole;
   phone: string;
+  /** Optional, and unique across the team when present. */
+  email?: string;
   /** Default share of a service's net price earned as commission (0–1). */
   commissionRate: number;
   /** Service category slugs this member is booked for. */

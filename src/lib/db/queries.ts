@@ -90,6 +90,7 @@ export const getStaff = cache(async (): Promise<Staff[]> => {
     name: s.name,
     role: STAFF_ROLE[s.role] ?? "Stylist",
     phone: s.phone,
+    email: s.email ?? undefined,
     commissionRate: toNumber(s.commissionRate),
     specialties: s.specialties.map((c) => SERVICE_CATEGORY[c]).filter(Boolean),
     monthlySalary: toNumber(s.monthlySalary),

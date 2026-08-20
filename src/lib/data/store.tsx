@@ -14,6 +14,7 @@ import {
   updateAppointmentAction,
   updateClientNotesAction,
   createStaffAction,
+  updateStaffAction,
 } from "@/lib/actions/salon";
 import {
   archivePackageAction,
@@ -94,6 +95,18 @@ export interface PackageInput {
   description?: string;
   price: number;
   serviceIds: string[];
+  active: boolean;
+}
+
+export interface StaffInput {
+  name: string;
+  role: Staff["role"];
+  phone: string;
+  email?: string;
+  /** A fraction (0.125), not a percentage — the form converts on submit. */
+  commissionRate: number;
+  specialties: ServiceCategory[];
+  monthlySalary: number;
   active: boolean;
 }
 
@@ -179,16 +192,8 @@ interface SalonActions {
   /** Soft delete — see `archiveProduct`. */
   archivePackage: (id: string) => Promise<SaveResult<{ name: string }>>;
 
-  addStaff: (input: {
-    name: string;
-    role: Staff["role"];
-    phone: string;
-    email?: string;
-    commissionRate: number;
-    specialties: ServiceCategory[];
-    monthlySalary: number;
-    active: boolean;
-  }) => Promise<SaveResult<{ id: string }>>;
+  addStaff: (input: StaffInput) => Promise<SaveResult<{ id: string }>>;
+  updateStaff: (id: string, input: StaffInput) => Promise<SaveResult<{ id: string; name: string }>>;
 
   /** Last error from a server action, for surfacing in the UI. */
   lastError: string | null;
@@ -408,6 +413,7 @@ export function SalonProvider({
       archivePackage: async (id) => finish(await archivePackageAction(id)),
 
       addStaff: async (input) => finish(await createStaffAction(input)),
+      updateStaff: async (id, input) => finish(await updateStaffAction(id, input)),
     }),
     [refresh, finish, lastError],
   );

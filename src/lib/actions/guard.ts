@@ -88,6 +88,24 @@ export async function recordAudit(
   }
 }
 
+/**
+ * Field-level diff for the audit metadata.
+ *
+ * "Someone edited this record" is not an audit trail. What the owner needs six
+ * weeks later is the pair of values — 1800 became 2400, and who did it.
+ *
+ * Lives here rather than beside its callers because a "use server" module may
+ * only export async functions, so every action file would otherwise keep its
+ * own copy.
+ */
+export function diff<T extends Record<string, unknown>>(before: T, after: T) {
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  for (const key of Object.keys(after)) {
+    if (before[key] !== after[key]) changes[key] = { from: before[key], to: after[key] };
+  }
+  return changes;
+}
+
 /** Uniform shape returned by every action, so the UI can branch on `ok`. */
 export type ActionResult<T = void> =
   | { ok: true; data: T }
