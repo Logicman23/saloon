@@ -134,18 +134,145 @@ try {
   process.exit(1);
 }
 
+/** The migration whose effects a `db push` database already has. */
+const BASELINE_MIGRATION = "0001_init";
+
+/** Every table 0001_init creates — the fingerprint a baseline is checked against. */
+const BASELINE_TABLES = [
+  "appointment_services",
+  "appointments",
+  "audit_logs",
+  "clients",
+  "expenses",
+  "inventory",
+  "invoice_lines",
+  "package_services",
+  "payments",
+  "permissions",
+  "promo_codes",
+  "role_permissions",
+  "sales_invoices",
+  "service_packages",
+  "services",
+  "sessions",
+  "staff",
+  "stock_movements",
+  "user_roles",
+  "users",
+];
+
+/**
+ * Reads the live schema over a short-lived connection.
+ *
+ * Raw SQL against information_schema deliberately — the generated client is
+ * built from the *new* schema.prisma, so any modelled query would reference
+ * columns this database is not supposed to have yet.
+ */
+async function inspect(query, params = []) {
+  const { PrismaClient } = await import("@prisma/client");
+  const client = new PrismaClient({ datasources: { db: { url: resolved.url } } });
+  try {
+    return await client.$queryRawUnsafe(query, ...params);
+  } finally {
+    await client.$disconnect();
+  }
+}
+
+/** True when tables exist but Prisma has no migration history for them. */
+async function isUnbaselined() {
+  try {
+    const rows = await inspect(
+      `SELECT to_regclass('public._prisma_migrations') IS NULL AS missing,
+              COUNT(*)::int AS tables
+         FROM information_schema.tables
+        WHERE table_schema = 'public'`,
+    );
+    return rows[0]?.missing === true && rows[0]?.tables > 0;
+  } catch {
+    // Unreachable or unreadable is not a baseline case — let the original
+    // migrate failure stand and be reported as itself.
+    return false;
+  }
+}
+
+/**
+ * Returns a reason to refuse, or null when baselining is safe.
+ *
+ * Two ways this database could differ from "0001_init and nothing since": it
+ * could be missing tables 0001_init creates, or it could already carry the
+ * later migrations' columns from a `db push` of a newer schema. The first
+ * means the baseline is a lie; the second means 0002 would fail on a column
+ * that already exists. Both are drift a human needs to look at.
+ */
+async function assertBaselineSafe() {
+  const present = await inspect(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
+  );
+  const names = new Set(present.map((row) => row.table_name));
+  const missing = BASELINE_TABLES.filter((table) => !names.has(table));
+  if (missing.length > 0) {
+    return `${missing.length} table(s) from ${BASELINE_MIGRATION} are absent — ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ", …" : ""}`;
+  }
+
+  const archived = await inspect(
+    `SELECT table_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND column_name = 'archived_at'`,
+  );
+  if (archived.length > 0) {
+    return `archived_at already exists on ${archived.map((row) => row.table_name).join(", ")} — the later migrations appear to have been applied by hand`;
+  }
+
+  return null;
+}
+
 /**
  * Prisma resolves `directUrl = env("DIRECT_URL")` from the schema, so the
  * resolved string is handed over under that name rather than passed as a flag.
  */
-const result = spawnSync(process.execPath, [prismaCli, "migrate", "deploy"], {
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    DIRECT_URL: resolved.url,
-    DATABASE_URL: resolveRuntimeUrl() ?? resolved.url,
-  },
-});
+const migrationEnv = {
+  ...process.env,
+  DIRECT_URL: resolved.url,
+  DATABASE_URL: resolveRuntimeUrl() ?? resolved.url,
+};
+
+const runPrisma = (...args) =>
+  spawnSync(process.execPath, [prismaCli, ...args], { stdio: "inherit", env: migrationEnv });
+
+let result = runPrisma("migrate", "deploy");
+
+/**
+ * P3005 — the schema has tables but no `_prisma_migrations` history.
+ *
+ * This database was created with `prisma db push`, so Prisma has no record of
+ * 0001_init having been applied and refuses to touch a schema it cannot
+ * account for. The documented fix is to baseline: mark 0001_init as already
+ * applied, leaving the genuinely pending migrations to run normally.
+ *
+ * Doing that automatically is only defensible because it is verified first and
+ * happens exactly once — the moment a history table exists, this branch is
+ * unreachable forever. `assertBaselineSafe` refuses unless the live schema is
+ * demonstrably the one 0001_init produces.
+ */
+if (result.status !== 0 && (await isUnbaselined())) {
+  console.log("\n  P3005 — database predates the migration history. Checking it can be baselined.");
+
+  const problem = await assertBaselineSafe();
+  if (problem) {
+    console.error(
+      `\n  ✗ Refusing to baseline: ${problem}\n` +
+        "    → The database does not match what 0001_init creates, so marking it applied\n" +
+        "      would hide real drift. Inspect it before deploying again.\n",
+    );
+    process.exit(1);
+  }
+
+  console.log("  Schema matches 0001_init — marking it applied, then retrying.\n");
+  if (runPrisma("migrate", "resolve", "--applied", BASELINE_MIGRATION).status !== 0) {
+    console.error("\n  ✗ Could not baseline the database.\n");
+    process.exit(1);
+  }
+  result = runPrisma("migrate", "deploy");
+}
 
 if (result.status !== 0) {
   console.error(
