@@ -92,6 +92,20 @@ function resolveRuntimeUrl() {
   return undefined;
 }
 
+/**
+ * Deliberate bypass for a database already known to be current.
+ *
+ * Failing closed is the right default: a schema mismatch discovered at runtime
+ * is worse than a failed build. But that leaves no way to ship a front-end fix
+ * while the migration path is blocked, so the escape hatch is explicit,
+ * opt-in, and announces itself in the build log.
+ */
+if (["1", "true", "yes"].includes((process.env.SKIP_MIGRATIONS ?? "").toLowerCase())) {
+  console.log("\n  SKIP_MIGRATIONS is set — not applying migrations.");
+  console.log("    The deployment assumes the database already matches this schema.\n");
+  process.exit(0);
+}
+
 const resolved = resolveDirectUrl();
 
 if (!resolved) {
@@ -235,8 +249,60 @@ const migrationEnv = {
   DATABASE_URL: resolveRuntimeUrl() ?? resolved.url,
 };
 
+/**
+ * Waits for the database to accept a connection before migrating.
+ *
+ * A build machine reaches Supabase over the public internet from whatever
+ * egress address its region hands out, and that path is not always up the
+ * instant the build starts. Prisma's own connect timeout is five seconds with
+ * no retry, so a single blip failed an entire deploy. Retrying costs seconds;
+ * a false failure costs a release.
+ *
+ * When every attempt times out the cause is not transient, and the message
+ * points at the settings that actually produce this rather than repeating
+ * "can't reach database server".
+ */
+async function waitForDatabase() {
+  const delays = [2000, 4000, 8000, 16000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await inspect("SELECT 1");
+      if (attempt > 0) console.log(`  Connected on attempt ${attempt + 1}.`);
+      return true;
+    } catch (error) {
+      // Prisma leads with a blank line and an "Invalid `...` invocation"
+      // banner; the sentence worth printing is the first line that is neither.
+      const detail =
+        String(error?.message ?? error)
+          .split("\n")
+          .map((line) => line.trim())
+          .find((line) => line && !line.startsWith("Invalid `")) ?? "no detail";
+      if (attempt >= delays.length) {
+        console.error(
+          `\n  ✗ No connection after ${delays.length + 1} attempts — ${detail}\n` +
+            "\n    The host resolved and the URL parsed, so this is the network path being\n" +
+            "    dropped rather than a bad connection string. Check, in order:\n" +
+            "\n      1. Supabase → Settings → Database → Network Restrictions.\n" +
+            "         When enabled it permits only the listed CIDRs, and a build machine's\n" +
+            "         address is not fixed. Allow 0.0.0.0/0 and ::/0, or disable it.\n" +
+            "      2. Supabase → Home. A paused free-tier project refuses connections.\n" +
+            "      3. That DIRECT_URL is the SESSION POOLER on port 5432. The direct\n" +
+            "         db.<ref>.supabase.co host is IPv6-only and unreachable from IPv4.\n" +
+            "\n    To ship while the schema is known to be current, set SKIP_MIGRATIONS=1.\n" +
+            "    It skips this step and nothing else.\n",
+        );
+        return false;
+      }
+      console.log(`  Attempt ${attempt + 1} failed (${detail}) — retrying in ${delays[attempt] / 1000}s…`);
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
 const runPrisma = (...args) =>
   spawnSync(process.execPath, [prismaCli, ...args], { stdio: "inherit", env: migrationEnv });
+
+if (!(await waitForDatabase())) process.exit(1);
 
 let result = runPrisma("migrate", "deploy");
 
