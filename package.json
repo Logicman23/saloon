@@ -4,10 +4,10 @@
   "private": true,
   "description": "Sana's Beauty Saloon Management System â€” POS, appointments, inventory, expenses and analytics.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "node scripts/migrate-deploy.mjs && prisma generate && next build",
     "build:no-migrate": "prisma generate && next build",
-    "start": "next start",
+    "start": "next start -p 3001",
     "lint": "eslint .",
     "typecheck": "prisma generate && tsc --noEmit",
     "postinstall": "prisma generate",
