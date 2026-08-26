@@ -14,8 +14,8 @@
     "db:check": "node scripts/check-db.mjs",
     "db:generate": "prisma generate",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:setup": "prisma migrate deploy && tsx prisma/seed.ts",
+    "db:seed": "tsx --env-file-if-exists=.env prisma/seed.ts",
+    "db:setup": "prisma migrate deploy && tsx --env-file-if-exists=.env prisma/seed.ts",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio"
