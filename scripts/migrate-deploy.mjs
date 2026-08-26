@@ -250,6 +250,123 @@ const migrationEnv = {
 };
 
 /**
+ * Describes a connection string without leaking it.
+ *
+ * Only ever used in failure messages, where knowing the host and port is the
+ * difference between "which variable is wrong" and "something is wrong".
+ */
+function shape(url) {
+  try {
+    const u = new URL(url);
+    return `host=${u.hostname} port=${u.port || "(none)"} user=${u.username || "(none)"} params=${u.search.slice(1) || "(none)"}`;
+  } catch {
+    return "unparseable as a URL";
+  }
+}
+
+/**
+ * Separates failures that retrying can fix from failures that it cannot.
+ *
+ * Returns null when the error is worth another attempt, or the specific thing
+ * to go and fix when it is not.
+ *
+ * This distinction is the whole point. A malformed connection string fails
+ * identically on every attempt, so retrying it burns thirty seconds and — far
+ * worse — ends at a message about network paths and paused projects, which is
+ * a description of a completely different fault. That misdirection cost real
+ * debugging time against a build that had already told us, five times, that
+ * it could not parse the URL.
+ */
+function classifyFailure(detail) {
+  if (/invalid port number|error parsing connection string|invalid connection string|Invalid URL|must start with the protocol/i.test(detail)) {
+    return {
+      headline: "the connection string is malformed — this is a parse failure, not a network one",
+      fixes: [
+        "Percent-encode special characters in the password: @ → %40, # → %23,",
+        "  ? → %3F, / → %2F, : → %3A. An unencoded @ or : makes the parser read",
+        "  the wrong segment as the port, which is the usual cause of this.",
+        "Check for quotes copied into the value box — a leading \" becomes part",
+        "  of the string, and the URL stops parsing at it.",
+        "Check the Supabase template placeholders were replaced: a leftover",
+        "  [PROJECT-REF] or [YOUR-PASSWORD] parses as an IPv6 literal and fails here.",
+      ],
+    };
+  }
+
+  if (/password authentication failed/i.test(detail)) {
+    return {
+      headline: "the server was reached and rejected the password",
+      fixes: [
+        "Percent-encode special characters, or reset the password to something",
+        "  alphanumeric in Supabase → Settings → Database.",
+      ],
+    };
+  }
+
+  // Two wordings in the wild: Supavisor answers "(ENOTFOUND) tenant/user
+  // <name> not found", older poolers "Tenant or user not found". The ENOTFOUND
+  // reads like DNS but is not — the host resolved fine and the pooler is the
+  // thing rejecting the username, so this must not be treated as transient.
+  if (/tenant or user not found|tenant\/user\b.*\bnot found/i.test(detail)) {
+    return {
+      headline: "the pooler was reached and did not recognise the username",
+      fixes: [
+        "The pooler hosts need postgres.<PROJECT-REF>; the direct",
+        "  db.<ref>.supabase.co host needs plain postgres.",
+        "If the username looks right, check the project ref in it matches the",
+        "  host region — a ref from a different Supabase project fails exactly here.",
+      ],
+    };
+  }
+
+  if (/Environment variable not found/i.test(detail)) {
+    return {
+      headline: "Prisma tried to resolve a variable that is not set in this environment",
+      fixes: [
+        "Set DIRECT_URL (port 5432) in the project's environment variables.",
+        "See .env.example for which Supabase string each name expects.",
+      ],
+    };
+  }
+
+  // Unrecognised, and everything genuinely transient (connect timeouts, DNS
+  // blips, a pooler still coming up) lands here and gets retried.
+  return null;
+}
+
+/** The guidance for a database that stayed unreachable across every attempt. */
+function reportUnreachable(detail, attempts, url) {
+  console.error(
+    `\n  ✗ No connection after ${attempts} attempts — ${detail}\n` +
+      `    ${shape(url)}\n` +
+      "\n    The string parsed and the host resolved, so this is the network path being\n" +
+      "    dropped rather than a bad connection string. Check, in order:\n" +
+      "\n      1. Supabase → Settings → Database → Network Restrictions.\n" +
+      "         When enabled it permits only the listed CIDRs, and a build machine's\n" +
+      "         address is not fixed. Allow 0.0.0.0/0 and ::/0, or disable it.\n" +
+      "      2. Supabase → Home. A paused free-tier project refuses connections.\n" +
+      "      3. That DIRECT_URL is the SESSION POOLER on port 5432. The direct\n" +
+      "         db.<ref>.supabase.co host is IPv6-only and unreachable from IPv4.\n" +
+      "\n    To ship while the schema is known to be current, set SKIP_MIGRATIONS=1.\n" +
+      "    It skips this step and nothing else.\n",
+  );
+}
+
+/** The guidance for a failure that will fail identically however often it runs. */
+function reportFatal({ headline, fixes }, detail, url) {
+  console.error(
+    `\n  ✗ Cannot connect — ${headline}.\n` +
+      `    ${detail}\n` +
+      `    ${shape(url)}\n` +
+      "\n" +
+      fixes.map((line) => (line.startsWith("  ") ? `      ${line}` : `    → ${line}`)).join("\n") +
+      "\n\n    Not retried: this fails the same way every time.\n" +
+      "\n    To ship while the schema is known to be current, set SKIP_MIGRATIONS=1.\n" +
+      "    It skips this step and nothing else.\n",
+  );
+}
+
+/**
  * Waits for the database to accept a connection before migrating.
  *
  * A build machine reaches Supabase over the public internet from whatever
@@ -258,9 +375,9 @@ const migrationEnv = {
  * no retry, so a single blip failed an entire deploy. Retrying costs seconds;
  * a false failure costs a release.
  *
- * When every attempt times out the cause is not transient, and the message
- * points at the settings that actually produce this rather than repeating
- * "can't reach database server".
+ * Retries are for that case only. A fault the retry cannot change — an
+ * unparseable URL, a rejected password, an unset variable — stops on the first
+ * attempt and says which one it is.
  */
 async function waitForDatabase() {
   const delays = [2000, 4000, 8000, 16000];
@@ -277,20 +394,15 @@ async function waitForDatabase() {
           .split("\n")
           .map((line) => line.trim())
           .find((line) => line && !line.startsWith("Invalid `")) ?? "no detail";
+
+      const fatal = classifyFailure(detail);
+      if (fatal) {
+        reportFatal(fatal, detail, resolved.url);
+        return false;
+      }
+
       if (attempt >= delays.length) {
-        console.error(
-          `\n  ✗ No connection after ${delays.length + 1} attempts — ${detail}\n` +
-            "\n    The host resolved and the URL parsed, so this is the network path being\n" +
-            "    dropped rather than a bad connection string. Check, in order:\n" +
-            "\n      1. Supabase → Settings → Database → Network Restrictions.\n" +
-            "         When enabled it permits only the listed CIDRs, and a build machine's\n" +
-            "         address is not fixed. Allow 0.0.0.0/0 and ::/0, or disable it.\n" +
-            "      2. Supabase → Home. A paused free-tier project refuses connections.\n" +
-            "      3. That DIRECT_URL is the SESSION POOLER on port 5432. The direct\n" +
-            "         db.<ref>.supabase.co host is IPv6-only and unreachable from IPv4.\n" +
-            "\n    To ship while the schema is known to be current, set SKIP_MIGRATIONS=1.\n" +
-            "    It skips this step and nothing else.\n",
-        );
+        reportUnreachable(detail, delays.length + 1, resolved.url);
         return false;
       }
       console.log(`  Attempt ${attempt + 1} failed (${detail}) — retrying in ${delays[attempt] / 1000}s…`);
