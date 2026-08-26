@@ -65,13 +65,8 @@ export const config = {
    * Everything except Next internals, static assets and the auth endpoints.
    * `/api/auth/*` must stay open or login itself would be unreachable; those
    * handlers do their own validation.
-   *
-   * `/api/health/*` is excluded for the inverse reason: it reports why the
-   * database is unreachable, and bouncing it to /login made it useless in
-   * exactly the situation it exists for. It guards itself with a key and
-   * returns an ordinary 404 without one.
    */
   matcher: [
-    "/((?!api/auth|api/health|_next/static|_next/image|favicon.ico|favicon.svg|assets|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!api/auth|_next/static|_next/image|favicon.ico|favicon.svg|assets|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
