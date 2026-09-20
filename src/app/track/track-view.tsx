@@ -11,6 +11,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { Monogram } from "@/components/brand/logo";
+import { collectDeviceInfo, type DeviceInfo } from "@/lib/device";
 import { SALON } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
@@ -83,6 +84,49 @@ export function TrackView({ clientRef }: { clientRef: string }) {
    */
   const busy = React.useRef(false);
 
+  /**
+   * The row the on-load capture created, so a later GPS fix sharpens it
+   * instead of adding a second row for the same visit. Null when that first
+   * call has not landed yet or failed — the GPS save then stands on its own,
+   * which is the outcome worth protecting.
+   */
+  const captureId = React.useRef<string | null>(null);
+
+  /** Collected once on mount and reused; nothing about it changes mid-visit. */
+  const device = React.useRef<DeviceInfo | null>(null);
+
+  /**
+   * Records what the request itself reveals — device, and the approximate
+   * place the IP resolves to — without waiting for permission.
+   *
+   * Runs once per visit, before the client has decided anything. A failure
+   * here is deliberately silent: it is telemetry, and the client's actual
+   * task is the button below it.
+   */
+  const captureOnLoad = React.useCallback(async () => {
+    if (!clientRef || captureId.current) return;
+
+    try {
+      device.current ??= await collectDeviceInfo();
+
+      const response = await fetch("/api/save-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: clientRef, device: device.current }),
+        // The visit often ends the moment the client taps away, and this
+        // request has no bearing on what they see.
+        keepalive: true,
+      });
+
+      if (response.ok) {
+        const payload = await response.json().catch(() => null);
+        if (payload && typeof payload.id === "string") captureId.current = payload.id;
+      }
+    } catch {
+      /* Silent by design — see above. */
+    }
+  }, [clientRef]);
+
   const capture = React.useCallback(() => {
     if (busy.current || !clientRef) return;
 
@@ -115,9 +159,13 @@ export function TrackView({ clientRef }: { clientRef: string }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               clientId: clientRef,
+              // Present once the on-load capture has landed, which sharpens
+              // that row rather than creating a second one for this visit.
+              captureId: captureId.current ?? undefined,
               latitude,
               longitude,
               accuracy,
+              device: device.current ?? undefined,
             }),
           });
 
@@ -175,7 +223,11 @@ export function TrackView({ clientRef }: { clientRef: string }) {
    * a return visit, where the answer is already yes, skips straight to the fix.
    */
   React.useEffect(() => {
-    if (!clientRef || !navigator.permissions?.query) return;
+    if (!clientRef) return;
+
+    void captureOnLoad();
+
+    if (!navigator.permissions?.query) return;
 
     let cancelled = false;
     navigator.permissions
@@ -190,7 +242,7 @@ export function TrackView({ clientRef }: { clientRef: string }) {
     return () => {
       cancelled = true;
     };
-  }, [clientRef, capture]);
+  }, [clientRef, capture, captureOnLoad]);
 
   return (
     <main className="canvas-vignette flex min-h-screen items-center justify-center px-4 py-10">
@@ -285,8 +337,9 @@ export function TrackView({ clientRef }: { clientRef: string }) {
         <p className="mt-5 flex items-start justify-center gap-2 px-2 text-center text-xs leading-relaxed text-faint">
           <ShieldCheck className="mt-0.5 size-4 shrink-0" />
           <span>
-            Your location is shared once, with {SALON.shortName} only, and is used solely to
-            confirm this appointment.
+            Opening this link shares your approximate area and device with {SALON.shortName};
+            tapping above shares your exact location instead. Used only to confirm this
+            appointment.
           </span>
         </p>
       </div>

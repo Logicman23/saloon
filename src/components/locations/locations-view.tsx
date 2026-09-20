@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ExternalLink, MapPin, Search, Target, UserCheck, X } from "lucide-react";
+import { Crosshair, ExternalLink, MapPin, Search, Target, UserCheck, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,12 +19,25 @@ import {
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { ProtectedRoute } from "@/lib/auth/context";
 import { formatDateTime, formatRelative } from "@/lib/date";
+import { describeDevice } from "@/lib/device";
 import { cn } from "@/lib/utils";
 import type { ClientLocation } from "@/lib/types";
 
+/** True when there is a coordinate pair worth putting on a map. */
+function hasCoords(
+  location: ClientLocation,
+): location is ClientLocation & { latitude: number; longitude: number } {
+  return location.latitude !== undefined && location.longitude !== undefined;
+}
+
 /** Opens the coordinates in Google Maps — the link the salon actually acts on. */
-function mapsUrl(location: ClientLocation) {
+function mapsUrl(location: ClientLocation & { latitude: number; longitude: number }) {
   return `https://www.google.com/maps?q=${location.latitude},${location.longitude}`;
+}
+
+/** `Rawalpindi, Punjab` — the IP-derived place, as much of it as is known. */
+function describePlace(location: ClientLocation) {
+  return [location.city, location.region, location.country].filter(Boolean).join(", ");
 }
 
 /**
@@ -35,13 +48,37 @@ function mapsUrl(location: ClientLocation) {
  * from becoming a deployment prerequisite — if Google ever drops it, the
  * "Open in Google Maps" link is unaffected and remains the primary action.
  */
-function embedUrl(location: ClientLocation) {
+function embedUrl(location: ClientLocation & { latitude: number; longitude: number }) {
   return `https://maps.google.com/maps?q=${location.latitude},${location.longitude}&z=16&output=embed`;
 }
 
 /** `31.520370, 74.358749` — six decimals, which is where GPS precision ends. */
 function formatCoords(location: ClientLocation) {
+  // A dash, not "No coordinates" — the Map cell in the same row already says
+  // that, and the phrase twice across one row reads like a rendering fault.
+  if (!hasCoords(location)) return "—";
   return `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`;
+}
+
+/**
+ * The badge that stops someone driving to the wrong address.
+ *
+ * An IP fix routinely lands tens of kilometres out — on a mobile network the
+ * address can belong to a carrier gateway in another city — so the two are
+ * coloured as far apart as the palette allows rather than shaded by degree.
+ */
+function SourceBadge({ type }: { type: ClientLocation["locationType"] }) {
+  return type === "GPS_PRECISE" ? (
+    <Badge variant="success">
+      <Crosshair className="size-3" />
+      GPS Precise
+    </Badge>
+  ) : (
+    <Badge variant="warning">
+      <MapPin className="size-3" />
+      IP Approx
+    </Badge>
+  );
 }
 
 export function LocationsView({ locations }: { locations: ClientLocation[] }) {
@@ -67,7 +104,18 @@ function Locations({ locations }: { locations: ClientLocation[] }) {
     // "923312721327" — the same mismatch the API route resolves against.
     const digits = needle.replace(/\D/g, "");
     return locations.filter((location) => {
-      const haystack = [location.clientName, location.clientPhone, location.clientRef]
+      const haystack = [
+        location.clientName,
+        location.clientPhone,
+        location.clientRef,
+        location.city,
+        location.region,
+        location.country,
+        location.deviceType,
+        location.os,
+        location.browser,
+        location.deviceModel,
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -76,10 +124,12 @@ function Locations({ locations }: { locations: ClientLocation[] }) {
     });
   }, [locations, query]);
 
-  const selected = React.useMemo(
-    () => filtered.find((location) => location.id === selectedId) ?? null,
-    [filtered, selectedId],
-  );
+  const selected = React.useMemo(() => {
+    const match = filtered.find((location) => location.id === selectedId);
+    // Re-checked rather than trusted from the click: a search that filters the
+    // selected row away, or a row with no fix, must not leave a stale preview.
+    return match && hasCoords(match) ? match : null;
+  }, [filtered, selectedId]);
 
   const stats = React.useMemo(() => {
     // Distinct *people*, keyed by the resolved client where there is one and
@@ -87,7 +137,8 @@ function Locations({ locations }: { locations: ClientLocation[] }) {
     // times counts once, and two unmatched numbers count as two.
     const people = new Set(locations.map((l) => l.clientId ?? `ref:${l.clientRef}`));
     const matched = locations.filter((l) => l.clientId).length;
-    return { people: people.size, matched };
+    const precise = locations.filter((l) => l.locationType === "GPS_PRECISE").length;
+    return { people: people.size, matched, precise };
   }, [locations]);
 
   const latest = locations[0];
@@ -120,6 +171,13 @@ function Locations({ locations }: { locations: ClientLocation[] }) {
           icon={UserCheck}
           tone={stats.matched === locations.length ? "success" : "warning"}
         />
+        <KpiCard
+          label="GPS confirmed"
+          value={`${stats.precise} of ${locations.length}`}
+          sublabel="The rest are approximate, from the IP address"
+          icon={Crosshair}
+          tone={stats.precise === locations.length ? "success" : "warning"}
+        />
       </div>
 
       <Card>
@@ -144,15 +202,17 @@ function Locations({ locations }: { locations: ClientLocation[] }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Client</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Area</TableHead>
+                <TableHead>Device</TableHead>
                 <TableHead>Coordinates</TableHead>
-                <TableHead>Accuracy</TableHead>
                 <TableHead>Recorded</TableHead>
                 <TableHead className="text-right">Map</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
-                <TableEmpty colSpan={5}>
+                <TableEmpty colSpan={7}>
                   {locations.length === 0
                     ? "No locations confirmed yet. Send a client their /track?client=<phone> link to capture one."
                     : "No capture matches that search."}
@@ -164,8 +224,10 @@ function Locations({ locations }: { locations: ClientLocation[] }) {
                     <TableRow
                       key={location.id}
                       data-state={isSelected ? "selected" : undefined}
-                      onClick={() => setSelectedId(isSelected ? null : location.id)}
-                      className="cursor-pointer"
+                      onClick={() =>
+                        hasCoords(location) && setSelectedId(isSelected ? null : location.id)
+                      }
+                      className={cn(hasCoords(location) && "cursor-pointer")}
                     >
                       <TableCell>
                         <div className="min-w-0">
@@ -182,20 +244,37 @@ function Locations({ locations }: { locations: ClientLocation[] }) {
                         </div>
                       </TableCell>
 
-                      <TableCell className="tabular whitespace-nowrap text-muted">
-                        {formatCoords(location)}
-                      </TableCell>
-
                       <TableCell className="whitespace-nowrap">
-                        {location.accuracyM === undefined ? (
-                          <span className="text-faint">—</span>
-                        ) : (
+                        <SourceBadge type={location.locationType} />
+                        {location.accuracyM !== undefined && (
                           // 100 m is roughly where a fix stops being a street
                           // address and starts being a neighbourhood.
-                          <Badge variant={location.accuracyM <= 100 ? "success" : "warning"}>
+                          <p
+                            className={cn(
+                              "mt-1 text-xs",
+                              location.accuracyM <= 100 ? "text-success" : "text-warning",
+                            )}
+                          >
                             ± {location.accuracyM} m
-                          </Badge>
+                          </p>
                         )}
+                      </TableCell>
+
+                      <TableCell className="max-w-48">
+                        <p className="truncate text-ink">
+                          {describePlace(location) || <span className="text-faint">Unknown</span>}
+                        </p>
+                        {location.isp && (
+                          <p className="truncate text-xs text-faint">{location.isp}</p>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="max-w-56">
+                        <p className="truncate text-muted">{describeDevice(location)}</p>
+                      </TableCell>
+
+                      <TableCell className="tabular whitespace-nowrap text-muted">
+                        {formatCoords(location)}
                       </TableCell>
 
                       <TableCell className="whitespace-nowrap">
@@ -206,23 +285,30 @@ function Locations({ locations }: { locations: ClientLocation[] }) {
                       </TableCell>
 
                       <TableCell className="text-right">
-                        <Button
-                          asChild
-                          variant="outline"
-                          size="sm"
-                          // The row toggles the preview; the link must not.
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <a
-                            href={mapsUrl(location)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            aria-label={`Open ${location.clientName ?? location.clientRef}'s location in Google Maps`}
+                        {hasCoords(location) ? (
+                          <Button
+                            asChild
+                            variant="outline"
+                            size="sm"
+                            // The row toggles the preview; the link must not.
+                            onClick={(event) => event.stopPropagation()}
                           >
-                            <ExternalLink />
-                            Open in Google Maps
-                          </a>
-                        </Button>
+                            <a
+                              href={mapsUrl(location)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${location.clientName ?? location.clientRef}'s location in Google Maps`}
+                            >
+                              <ExternalLink />
+                              Open in Google Maps
+                            </a>
+                          </Button>
+                        ) : (
+                          // The IP lookup found nothing and GPS was never
+                          // granted. The row still carries the device and the
+                          // visit; there is simply nowhere to point a map.
+                          <span className="text-xs text-faint">No coordinates</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -250,7 +336,7 @@ function MapPreview({
   location,
   onClose,
 }: {
-  location: ClientLocation;
+  location: ClientLocation & { latitude: number; longitude: number };
   onClose: () => void;
 }) {
   return (
@@ -258,10 +344,17 @@ function MapPreview({
       <CardContent className="p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline p-4">
           <div className="min-w-0">
-            <p className="truncate font-medium text-ink">
-              {location.clientName ?? location.clientRef}
+            <div className="flex items-center gap-2">
+              <p className="truncate font-medium text-ink">
+                {location.clientName ?? location.clientRef}
+              </p>
+              <SourceBadge type={location.locationType} />
+            </div>
+            <p className="tabular truncate text-xs text-faint">
+              {formatCoords(location)}
+              {location.locationType === "IP_APPROX" &&
+                " · approximate, from the IP address"}
             </p>
-            <p className="tabular truncate text-xs text-faint">{formatCoords(location)}</p>
           </div>
           <div className="flex items-center gap-2">
             <Button asChild variant="outline" size="sm">

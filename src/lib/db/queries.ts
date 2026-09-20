@@ -445,9 +445,26 @@ export const getClientLocations = cache(async (limit = 500): Promise<ClientLocat
     clientId: row.clientId ?? undefined,
     clientName: row.client?.name,
     clientPhone: row.client?.phone,
-    latitude: toNumber(row.latitude),
-    longitude: toNumber(row.longitude),
+
+    locationType: row.locationType,
+    // `toNumber` maps null to 0, which here would be a real place in the Gulf
+    // of Guinea rather than a missing value — so null is preserved instead.
+    latitude: row.latitude === null ? undefined : toNumber(row.latitude),
+    longitude: row.longitude === null ? undefined : toNumber(row.longitude),
     accuracyM: row.accuracyM ?? undefined,
+
+    ipAddress: row.ipAddress ?? undefined,
+    city: row.city ?? undefined,
+    region: row.region ?? undefined,
+    country: row.country ?? undefined,
+    isp: row.isp ?? undefined,
+
+    deviceType: row.deviceType ?? undefined,
+    os: row.os ?? undefined,
+    browser: row.browser ?? undefined,
+    deviceModel: row.deviceModel ?? undefined,
+    screenResolution: row.screenResolution ?? undefined,
+
     capturedAt: row.createdAt.toISOString(),
   }));
 });

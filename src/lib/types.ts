@@ -296,16 +296,41 @@ export interface Expense {
  * dashboard can show a name where it has one and the raw number where it
  * does not.
  */
+export type LocationSource = "IP_APPROX" | "GPS_PRECISE";
+
 export interface ClientLocation {
   id: string;
   clientRef: string;
   clientId?: string;
   clientName?: string;
   clientPhone?: string;
-  latitude: number;
-  longitude: number;
-  /** Browser-reported accuracy radius in metres, when the device gave one. */
+
+  /**
+   * Whether the coordinates came from the device's GPS or from the request
+   * IP. The gap between the two is large enough to matter: an IP fix on a
+   * mobile network can land in a different city.
+   */
+  locationType: LocationSource;
+  /** Absent when the IP lookup returned nothing and GPS was never granted. */
+  latitude?: number;
+  longitude?: number;
+  /** Accuracy radius in metres. Only ever set on a GPS fix. */
   accuracyM?: number;
+
+  /** Approximate place and carrier derived from the IP address. */
+  ipAddress?: string;
+  city?: string;
+  region?: string;
+  country?: string;
+  isp?: string;
+
+  /** Self-reported by the browser, so indicative rather than authoritative. */
+  deviceType?: string;
+  os?: string;
+  browser?: string;
+  deviceModel?: string;
+  screenResolution?: string;
+
   /** ISO timestamp of the confirmation. */
   capturedAt: string;
 }
