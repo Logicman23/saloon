@@ -106,6 +106,49 @@ if (["1", "true", "yes"].includes((process.env.SKIP_MIGRATIONS ?? "").toLowerCas
   process.exit(0);
 }
 
+/**
+ * Preview deployments must not migrate the production database.
+ *
+ * This is the failure this block exists to prevent, and it has already
+ * happened once: a preview build applied a migration that renamed a column,
+ * production was still serving code generated from the old schema, and its
+ * dashboard broke — from a branch nobody had merged. A preview is supposed to
+ * be the safe place to look at a change. While it shares a database with
+ * production, it is the opposite: the riskiest deploy in the project, because
+ * it changes production without any of the deliberation merging implies.
+ *
+ * So a non-production Vercel build skips migrations unless it has been told,
+ * explicitly, that it is pointed somewhere else. It exits 0 rather than
+ * failing: a preview that cannot show a new column is a nuisance, and a
+ * production outage is not, so the nuisance wins.
+ *
+ * Skipping is a guard, not a fix. A preview sharing production's database
+ * still READS AND WRITES PRODUCTION DATA — a test capture on a preview URL
+ * lands in the real table. Only a separate database fixes that; see
+ * .env.example.
+ */
+const vercelEnv = process.env.VERCEL_ENV;
+const previewMigrationsAllowed = ["1", "true", "yes"].includes(
+  (process.env.ALLOW_PREVIEW_MIGRATIONS ?? "").toLowerCase(),
+);
+
+if (vercelEnv && vercelEnv !== "production" && !previewMigrationsAllowed) {
+  console.log(`
+  VERCEL_ENV is "${vercelEnv}" — not applying migrations.
+
+    A non-production build will not alter a database it may share with
+    production. Pages needing a new column will report the database as
+    unavailable until this branch is merged.
+
+    To let previews migrate — only once they have their OWN database:
+      1. Create a second Supabase project for previews.
+      2. In Vercel > Settings > Environment Variables, set DATABASE_URL and
+         DIRECT_URL for the Preview environment ONLY, pointing at it.
+      3. Set ALLOW_PREVIEW_MIGRATIONS=1, also Preview-only.
+`);
+  process.exit(0);
+}
+
 const resolved = resolveDirectUrl();
 
 if (!resolved) {
@@ -117,7 +160,23 @@ if (!resolved) {
   process.exit(1);
 }
 
+/**
+ * Host and database name only. Enough to see at a glance which database a
+ * build is about to alter — the check that would have caught the preview
+ * incident — and never the password, which has no business in a build log.
+ */
+function describeTarget(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    return "unparseable connection string";
+  }
+}
+
 console.log(`\n  Applying migrations via ${resolved.source}`);
+console.log(`    target:      ${describeTarget(resolved.url)}`);
+if (vercelEnv) console.log(`    environment: ${vercelEnv}`);
 
 /**
  * Prisma's CLI entrypoint, resolved from the package itself and run under this
