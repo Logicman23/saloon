@@ -286,6 +286,30 @@ export interface Expense {
   recordedByStaffId: string;
 }
 
+/* -------------------------------------------------------------- Locations */
+
+/**
+ * A GPS fix a client confirmed through their `/track?client=…` link.
+ *
+ * `clientRef` is the identifier the link carried; `clientId` / `clientName`
+ * are filled only when that identifier resolved to someone on file, so the
+ * dashboard can show a name where it has one and the raw number where it
+ * does not.
+ */
+export interface ClientLocation {
+  id: string;
+  clientRef: string;
+  clientId?: string;
+  clientName?: string;
+  clientPhone?: string;
+  latitude: number;
+  longitude: number;
+  /** Browser-reported accuracy radius in metres, when the device gave one. */
+  accuracyM?: number;
+  /** ISO timestamp of the confirmation. */
+  capturedAt: string;
+}
+
 /* -------------------------------------------------------------- Reporting */
 
 export interface StaffPerformance {

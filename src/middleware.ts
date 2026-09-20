@@ -62,11 +62,19 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   /**
-   * Everything except Next internals, static assets and the auth endpoints.
-   * `/api/auth/*` must stay open or login itself would be unreachable; those
-   * handlers do their own validation.
+   * Everything except Next internals, static assets and the routes that must
+   * answer without a session.
+   *
+   * `/api/auth/*` must stay open or login itself would be unreachable.
+   *
+   * `/track` and `/api/save-location` are the client-facing half of the
+   * location feature: the person opening that link is a salon customer, not a
+   * user of this system, and has no account to sign in with. Leaving them
+   * inside the matcher would bounce every client to /login, which is the one
+   * outcome that makes the feature useless. Both do their own validation, and
+   * the capture endpoint is rate-limited per IP.
    */
   matcher: [
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|favicon.svg|assets|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!api/auth|api/save-location|track|_next/static|_next/image|favicon.ico|favicon.svg|assets|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

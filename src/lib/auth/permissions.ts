@@ -64,6 +64,7 @@ export const PERMISSIONS = [
   "clients.view",
   "clients.manage",
   "clients.export", //       bulk contact export
+  "locations.view", //       confirmed GPS fixes from client tracking links
 
   // Catalogue
   "services.view",
@@ -101,7 +102,12 @@ const CASHIER_PERMISSIONS: readonly Permission[] = [
   "inventory.view",
   // Explicitly withheld: finance.view, reports.view, expenses.*, invoice.void,
   // pos.discount.override, services.manage, inventory.manage, staff.manage,
-  // users.manage, clients.export, commissions.*
+  // users.manage, clients.export, commissions.*, locations.view.
+  //
+  // locations.view is owner-only by default: a confirmed GPS fix says where a
+  // client physically was, which is a sharper disclosure than the phone number
+  // the front desk already holds. Add it to this list if the desk is the one
+  // arranging home visits.
 ];
 
 const STAFF_PERMISSIONS: readonly Permission[] = [
@@ -190,6 +196,7 @@ export const ROUTE_PERMISSIONS: Array<{ prefix: string; anyOf: Permission[] }> =
   { prefix: "/pos", anyOf: ["pos.operate"] },
   { prefix: "/appointments", anyOf: ["appointments.view.all", "appointments.manage"] },
   { prefix: "/clients", anyOf: ["clients.view"] },
+  { prefix: "/locations", anyOf: ["locations.view"] },
   { prefix: "/services", anyOf: ["services.view"] },
   { prefix: "/inventory", anyOf: ["inventory.view"] },
   { prefix: "/expenses", anyOf: ["expenses.view"] },

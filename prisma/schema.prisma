@@ -315,10 +315,56 @@ model Client {
 
   appointments Appointment[]
   invoices     Invoice[]
+  locations    ClientLocation[]
 
   @@index([name])
   @@index([archivedAt])
   @@map("clients")
+}
+
+/// A GPS fix a client confirmed by opening their `/track?client=…` link.
+///
+/// Append-only: every confirmation is its own row rather than an upsert onto
+/// the client, because "where were they when they confirmed" is a history. A
+/// home visit booked last month and one booked today are different places,
+/// and overwriting would destroy the earlier answer.
+///
+/// `client_ref` is the identifier exactly as it arrived in the link, and it
+/// is what makes a capture survivable: a number matching nobody on file (a
+/// new client, a typo, a number saved in another format) still lands as a
+/// readable row instead of being dropped. `client_id` is the resolved match
+/// when one exists, and is nullable for that same reason.
+model ClientLocation {
+  id String @id @default(cuid())
+  /// The raw `?client=` value from the tracking link, stored verbatim.
+  clientRef String  @map("client_ref")
+  /// Resolved by matching the last 10 digits of `client_ref` against a
+  /// client's phone. Null when nothing matched.
+  clientId  String? @map("client_id")
+
+  /// Decimal, never Float — a rounded coordinate is a different street.
+  /// (9,6) covers ±180.000000, roughly 0.1 m of resolution.
+  latitude  Decimal @db.Decimal(9, 6)
+  longitude Decimal @db.Decimal(9, 6)
+  /// The browser's own accuracy estimate, in metres. Worth keeping: a 15 m
+  /// fix and a 3000 m one look identical as coordinates but mean very
+  /// different things to whoever has to drive there.
+  accuracyM Int?    @map("accuracy_m")
+
+  /// Request provenance. This endpoint is public and unauthenticated, so
+  /// these are what make a suspect row explainable after the fact.
+  ip        String?
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// SetNull, not Cascade: archiving or deleting a client must not silently
+  /// take the location trail with them.
+  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([clientRef, createdAt])
+  @@index([clientId])
+  @@map("client_locations")
 }
 
 /* ------------------------------------------------------- Service catalogue */

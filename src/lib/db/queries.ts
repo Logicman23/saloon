@@ -6,6 +6,7 @@ import type {
   AppointmentStatus,
   AppUser,
   Client,
+  ClientLocation,
   Expense,
   ExpenseCategory,
   Invoice,
@@ -415,6 +416,39 @@ export const getStockMovements = cache(async (limit = 120): Promise<StockMovemen
     note: m.note ?? undefined,
     staffId: m.staffId ?? undefined,
     at: m.at.toISOString(),
+  }));
+});
+
+/* ------------------------------------------------------------- Locations */
+
+/**
+ * Confirmed GPS fixes, newest first.
+ *
+ * The client is joined rather than looked up in the UI so an archived client
+ * still resolves to a name — same reasoning as `getServices`: filtering them
+ * out here would blank the name on every historical capture.
+ *
+ * Bounded by `limit` because this table only ever grows: a salon reads the
+ * recent confirmations, and an unbounded read would get slower every month
+ * for no one's benefit.
+ */
+export const getClientLocations = cache(async (limit = 500): Promise<ClientLocation[]> => {
+  const rows = await prisma.clientLocation.findMany({
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    include: { client: { select: { name: true, phone: true } } },
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    clientRef: row.clientRef,
+    clientId: row.clientId ?? undefined,
+    clientName: row.client?.name,
+    clientPhone: row.client?.phone,
+    latitude: toNumber(row.latitude),
+    longitude: toNumber(row.longitude),
+    accuracyM: row.accuracyM ?? undefined,
+    capturedAt: row.createdAt.toISOString(),
   }));
 });
 
